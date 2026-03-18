@@ -1,22 +1,213 @@
-<!DOCTYPE html><html><body style="background:#111; color:#0f0; font-family:monospace; padding:50px; text-align:center;">
-    <h1>Crappi LXC OVH</h1>
-    <p style="color:yellow;">{{ msg }}</p>
-    
-    <div style="border:1px solid #0f0; padding:20px; display:inline-block; margin-bottom:20px;">
-        <h3>Já tens conta?</h3>
-        <form action="/login" method="POST">
-            <input name="email" placeholder="Email" required><br><br>
-            <input type="password" name="pw" placeholder="Senha" required><br><br>
-            <button style="background:#0f0; color:#000; padding:5px 15px; font-weight:bold; cursor:pointer;">Login</button>
-        </form>
+<!DOCTYPE html>
+<html lang="en" style="scroll-behavior: smooth;">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crappy LXC OVH - Low End Hosting</title>
+    <style>
+        :root { --bg: #0a0a0a; --green: #00ff00; --dark-green: #003300; --gray: #333333; --light-gray: #aaaaaa; }
+        body { background-color: var(--bg); color: var(--green); font-family: 'Courier New', Courier, monospace; margin: 0; padding: 0; line-height: 1.6; }
+        a { color: var(--green); text-decoration: none; }
+        a:hover { text-decoration: underline; background-color: var(--green); color: var(--bg); }
+        .alert-banner { background-color: var(--dark-green); border-bottom: 1px solid var(--green); color: var(--green); text-align: center; padding: 10px; font-weight: bold; font-size: 0.9em; }
+        nav { border-bottom: 1px dashed var(--green); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; position: sticky; top: 0; background: var(--bg); z-index: 100; }
+        .nav-links a { margin-left: 20px; font-weight: bold; }
+        .nav-login { border: 1px solid yellow; color: yellow; padding: 5px 10px; }
+        .nav-login:hover { background: yellow; color: var(--bg); }
+        .container { max-width: 1000px; margin: 0 auto; padding: 40px 20px; min-height: 80vh; }
+        section { margin-bottom: 80px; padding-top: 40px; }
+        h1, h2, h3 { text-transform: uppercase; border-left: 5px solid var(--green); padding-left: 10px; }
+        h1 { font-size: 2.5em; margin-bottom: 10px; }
+        .hero { display: flex; gap: 30px; align-items: stretch; flex-wrap: wrap; }
+        .hero-text { flex: 1; min-width: 300px; display: flex; flex-direction: column; justify-content: center; }
+        .hero-img-box { flex: 1; min-width: 300px; border: 2px dashed var(--gray); padding: 10px; text-align: center; display: flex; flex-direction: column; }
+        .hero-img-box img { max-width: 100%; height: auto; filter: grayscale(100%) contrast(120%); margin-bottom: auto; }
+        .status-box { background: var(--dark-green); padding: 10px; border: 1px solid var(--green); display: inline-block; margin-top: 15px; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; align-items: stretch; }
+        .card { border: 1px solid var(--green); padding: 20px; transition: 0.2s; background: #111; display: flex; flex-direction: column; }
+        .card:hover { transform: translateY(-5px); box-shadow: 0 5px 15px rgba(0,255,0,0.2); }
+        .card h3 { border-bottom: 1px solid var(--green); padding-bottom: 10px; border-left: none; text-align: center; margin-top: 0; }
+        .card .price { font-size: 1.5em; text-align: center; margin: 15px 0; color: white; }
+        .card ul { list-style-type: none; padding: 0; margin-bottom: 20px; }
+        .card ul li::before { content: "» "; color: var(--green); }
+        .card-footer { margin-top: auto; }
+        .sold-out { border-color: #555 !important; color: #777 !important; background: #050505 !important; opacity: 0.6; pointer-events: none; }
+        .sold-out h3, .sold-out .price { color: #555 !important; border-color: #333 !important; }
+        .sold-out ul li::before { color: #555; }
+        .sold-out .btn { background: #333 !important; color: #111 !important; border: 1px solid #222; }
+        .btn { display: block; width: 100%; text-align: center; background: var(--green); color: var(--bg); padding: 10px; font-weight: bold; border: none; cursor: pointer; text-transform: uppercase; box-sizing: border-box; }
+        .btn:hover { background: white; color: black; }
+        .hosting-features { display: flex; flex-wrap: wrap; gap: 20px; margin-top: 20px; align-items: stretch; }
+        .hosting-box { flex: 1; min-width: 250px; display: flex; flex-direction: column; }
+        .hosting-code { background: #000; padding: 15px; border: 1px solid var(--gray); display: flex; align-items: center; }
+        .auth-forms { display: flex; gap: 40px; justify-content: center; flex-wrap: wrap; align-items: stretch; }
+        .auth-box { border: 1px solid var(--gray); padding: 30px; width: 300px; display: flex; flex-direction: column; }
+        .auth-box form { display: flex; flex-direction: column; flex-grow: 1; }
+        input { width: 100%; padding: 10px; margin-bottom: 15px; background: #222; border: 1px solid #555; color: var(--green); font-family: monospace; box-sizing: border-box;}
+        input:focus { outline: none; border-color: var(--green); }
+        .auth-box .btn { margin-top: auto; }
+        .highlight { background: var(--green); color: var(--bg); padding: 0 5px; }
+        .blink { animation: blinker 1s linear infinite; }
+        @keyframes blinker { 50% { opacity: 0; } }
+        footer { text-align: center; padding: 30px 20px; margin-top: 50px; border-top: 1px dashed var(--gray); color: var(--gray); font-size: 0.8em; }
+    </style>
+</head>
+<body>
+
+    <div class="alert-banner">
+        ⚠️ PROMO: Native LXC isolation + IPv6 /112. Pay with Polygon (POL) for instant deployment.
     </div>
-    <br>
-    <div style="border:1px solid #555; padding:20px; display:inline-block;">
-        <h3>Novo aqui?</h3>
-        <form action="/registar" method="POST">
-            <input name="email" placeholder="Novo Email" required><br><br>
-            <input type="password" name="pw" placeholder="Nova Senha" required><br><br>
-            <button style="background:#444; color:#fff; padding:5px 15px; cursor:pointer;">Criar Conta</button>
-        </form>
+
+    <nav>
+        <div>
+            <b>root@crappy-lxc:~#</b><span class="blink">_</span>
+        </div>
+        <div class="nav-links">
+            <a href="#welcome">/home</a>
+            <a href="#vps">/vps-lxc</a>
+            <a href="#hosting">/hosting</a>
+            <a href="#login" class="nav-login">Restricted_Access</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <section id="welcome" class="hero">
+            <div class="hero-text">
+                <h1>Honest Hosting. <br>Real Hardware.</h1>
+                <p>Forget the corporate cloud and overpriced generic servers. We stack real hardware to offer you pure LXC isolation for the price of a coffee.</p>
+                <p>Anonymous, red-tape-free payments using <b>Polygon (MATIC/POL)</b>.</p>
+                
+                <div class="status-box">
+                    Datacenter Capacity:<br>
+                    <progress value="{{ vagas_disponiveis }}" max="{{ total_slots }}" style="width: 100%;"></progress><br>
+                    > {{ vagas_disponiveis }} slots remaining.
+                </div>
+            </div>
+            <div class="hero-img-box">
+                <img src="/static/datacenter.jpg" alt="Our Cluster">
+                <p style="font-size: 0.8em; color: var(--light-gray); margin-top: 10px;">Fig 1. Our highly sophisticated, 100% real datacenter.</p>
+            </div>
+        </section>
+
+        <section id="vps">
+            <h2>> cat /etc/vps_plans.conf</h2>
+            <p>Pure LXC containers with dedicated IPv6 (/112) and IPv4 NAT for outbound traffic. Full root access included.</p>
+            <p style="color: yellow; font-size: 0.9em; border: 1px dashed yellow; padding: 10px; display: inline-block;">
+                <b>System Architectures:</b> We support <code>armhf</code>, <code>arm64</code>, and <code>amd64</code>.<br>
+                <i>Notice: Currently, ONLY <b>armhf</b> nodes have available slots.</i>
+            </p>
+            
+            <div class="grid" style="margin-top: 20px;">
+                <div class="card">
+                    <h3>Scrap</h3>
+                    <div class="price">${{ preco_usd }} <span style="font-size:0.5em">/mo</span></div>
+                    <ul>
+                        <li><span class="highlight">64MB RAM</span></li>
+                        <li>1 vCPU (armhf)</li>
+                        <li>256MB Storage</li>
+                        <li>Native IPv6 + IPv4 NAT</li>
+                    </ul>
+                    <div class="card-footer">
+                        <p style="font-size:0.8em; color:var(--light-gray); text-align:center;">Est. {{ preco_pol }} POL</p>
+                        <a href="#login"><button class="btn">Deploy Scrap</button></a>
+                    </div>
+                </div>
+
+                <div class="card sold-out">
+                    <h3>Decent</h3>
+                    <div class="price">$0.25 <span style="font-size:0.5em">/mo</span></div>
+                    <ul>
+                        <li><span class="highlight">128MB RAM</span></li>
+                        <li>1 vCPU (arm64 / amd64)</li>
+                        <li>2.5GB Storage</li>
+                        <li>Native IPv6 + IPv4 NAT</li>
+                    </ul>
+                    <div class="card-footer">
+                        <p style="font-size:0.8em; text-align:center;">Node full</p>
+                        <button class="btn" disabled>OUT OF STOCK</button>
+                    </div>
+                </div>
+
+                <div class="card sold-out">
+                    <h3>Tycoon</h3>
+                    <div class="price">$0.50 <span style="font-size:0.5em">/mo</span></div>
+                    <ul>
+                        <li><span class="highlight">256MB RAM</span></li>
+                        <li>2 vCPU (arm64 / amd64)</li>
+                        <li>5GB Storage</li>
+                        <li>Native IPv6 + IPv4 NAT</li>
+                    </ul>
+                    <div class="card-footer">
+                        <p style="font-size:0.8em; text-align:center;">Node full</p>
+                        <button class="btn" disabled>OUT OF STOCK</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="hosting">
+            <h2>> python3 query_runner.py</h2>
+            <div style="background: var(--dark-green); padding: 30px; border: 1px dashed var(--green);">
+                <p>Included for <b>FREE</b> with any VPS plan above. No heavy OS to manage, just pure, ephemeral execution.</p>                
+                
+                <div class="hosting-features">
+                    <div class="hosting-box">
+                        <h3 style="border-left: none; margin-top: 0;">The "Crappy" Stack:</h3>
+                        <ul style="margin: 0; padding-left: 20px;">
+                            <li>✓ Cloudflare + <b>lighttpd</b> edge proxy</li>
+                            <li>✓ <b>Python only.</b></li>
+                            <li>✓ Ephemeral runs: queries execute from GDrive and the process is immediately terminated.</li>
+                            <li>✓ Zero idle bloat. Maximum efficiency.</li>
+                        </ul>
+                    </div>
+                    <div class="hosting-box hosting-code">
+                        <code style="color: var(--light-gray); width: 100%;">
+                            $ curl -I https://crappy.lxc.ovh<br>
+                            > HTTP/3 200 OK<br>
+                            > Server: cloudflare / lighttpd<br>
+                            > X-Powered-By: Python Ephemeral<br>
+                            > Status: "Query Executed. Process Terminated."
+                        </code>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section id="login">
+            <h2>> su - user</h2>
+            <p style="text-align: center; color: yellow;">{{ msg }}</p>
+            
+            <div class="auth-forms">
+                <div class="auth-box">
+                    <h3 style="margin-top:0;">Already have an account?</h3>
+                    <form action="/login" method="POST">
+                        <label>> Email:</label>
+                        <input type="email" name="email" required>
+                        <label>> Password:</label>
+                        <input type="password" name="pw" required>
+                        <button type="submit" class="btn">Authenticate</button>
+                    </form>
+                </div>
+
+                <div class="auth-box" style="border-style: dashed;">
+                    <h3 style="margin-top:0; color: var(--light-gray);">New here?</h3>
+                    <p style="font-size: 0.8em; color: var(--light-gray);">No personal data required. Just a valid email to receive your instance credentials.</p>
+                    <form action="/registar" method="POST">
+                        <label>> New Email:</label>
+                        <input type="email" name="email" required>
+                        <label>> New Password:</label>
+                        <input type="password" name="pw" required>
+                        <button type="submit" class="btn" style="background: var(--gray); color: white;">Create Account</button>
+                    </form>
+                </div>
+            </div>
+        </section>
     </div>
-</body></html>
+
+    <footer>
+        <p>&copy; 2026 lxc.ovh - All rights reversed.</p>
+        <p>Proudly hosted on an ARM TV Box. Best viewed in Netscape Navigator 4.0 at 800x600 resolution.</p>
+    </footer>
+
+</body>
+</html>

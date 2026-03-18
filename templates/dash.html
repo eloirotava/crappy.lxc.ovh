@@ -1,61 +1,182 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Painel - Crappi LXC</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crappy LXC - Control Panel</title>
+    <style>
+        :root { --bg: #0a0a0a; --green: #00ff00; --dark-green: #003300; --gray: #333333; --light-gray: #aaaaaa; }
+        body { background-color: var(--bg); color: var(--green); font-family: 'Courier New', Courier, monospace; margin: 0; padding: 0; line-height: 1.6; }
+        a { color: var(--green); text-decoration: none; }
+        a:hover { text-decoration: underline; background-color: var(--green); color: var(--bg); }
+        nav { border-bottom: 1px dashed var(--green); padding: 15px 20px; display: flex; justify-content: space-between; align-items: center; background: var(--bg); }
+        .nav-links a { margin-left: 20px; font-weight: bold; }
+        .container { max-width: 900px; margin: 0 auto; padding: 40px 20px; }
+        h1, h2, h3 { text-transform: uppercase; border-left: 5px solid var(--green); padding-left: 10px; margin-top: 0;}
+        
+        .deploy-box { border: 1px dashed var(--green); background: var(--dark-green); padding: 20px; margin-bottom: 40px; display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 20px; }
+        .deploy-info { flex: 1; min-width: 250px; }
+        .deploy-action { text-align: right; }
+
+        .btn { background: var(--green); color: var(--bg); padding: 10px 20px; font-weight: bold; border: none; cursor: pointer; text-transform: uppercase; font-family: inherit; }
+        .btn:hover { background: white; color: black; }
+
+        .instance-card { border: 1px solid var(--green); background: #111; padding: 20px; margin-bottom: 20px; display: flex; flex-direction: column; }
+        .instance-header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px dashed var(--gray); padding-bottom: 10px; margin-bottom: 15px; }
+        .instance-id { font-size: 1.2em; font-weight: bold; }
+        
+        .status { padding: 2px 8px; font-weight: bold; font-size: 0.9em; }
+        .status-active { background: var(--green); color: var(--bg); }
+        .status-pending { background: yellow; color: black; animation: blinker 2s linear infinite; }
+        
+        .action-bar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; background: #000; padding: 10px; border: 1px solid var(--gray); }
+        .btn-action { background: #222; color: #ddd; border: 1px solid #555; padding: 5px 10px; font-family: inherit; font-size: 0.9em; cursor: pointer; font-weight: bold; }
+        .btn-action:hover { border-color: white; }
+        .btn-start:hover { background: var(--green); color: black; border-color: var(--green); }
+        .btn-stop:hover { background: yellow; color: black; border-color: yellow; }
+        .btn-reboot:hover { background: orange; color: black; border-color: orange; }
+        .btn-danger:hover { background: red; color: white; border-color: red; }
+
+        .btn-console { width: 100%; background: #000; color: var(--green); border: 1px dashed var(--green); padding: 15px; margin-top: 15px; font-size: 1.1em; }
+        .btn-console:hover { background: var(--green); color: #000; }
+
+        .payment-box { display: flex; flex-wrap: wrap; gap: 20px; background: #050505; border: 1px solid var(--gray); padding: 20px; margin-top: 10px; }
+        .qr-code { border: 2px solid var(--green); padding: 5px; background: #000; width: 150px; height: 150px; }
+        .payment-details { flex: 1; min-width: 250px; display: flex; flex-direction: column; justify-content: center; }
+        .crypto-data { background: #222; padding: 10px; border: 1px dashed #555; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center; word-break: break-all; }
+        .crypto-data code { color: white; font-size: 1.1em; }
+        
+        .copy-btn { background: #444; color: white; border: none; padding: 5px 10px; cursor: pointer; font-family: inherit; margin-left: 10px; }
+        .copy-btn:hover { background: var(--green); color: black; }
+
+        .blink { animation: blinker 1s linear infinite; }
+        @keyframes blinker { 50% { opacity: 0; } }
+        footer { text-align: center; padding: 20px; border-top: 1px dashed var(--gray); color: var(--gray); font-size: 0.8em; margin-top: 50px;}
+    </style>
 </head>
-<body style="background:#111; color:#0f0; font-family:monospace; padding:50px;">
-    <h1>O teu Bunker</h1>
-    
-    <div style="border:1px dashed #0f0; padding:15px; margin-bottom:20px; display:inline-block;">
-        <h3>Comprar VPS (Promoção)</h3>
-        <p>Valor: ${{ preco_usd }} USD <br> <b>Equivalente a: ~{{ preco_pol }} POL</b></p>
-        <form action="/comprar" method="POST">
-            <button style="background:green; color:white; padding:10px 20px; font-weight:bold; cursor:pointer; border:none;">LANÇAR FOSSIL LXC</button>
-        </form>
-    </div>
-    
-    <hr style="border-color:#333;">
-    <h2>As tuas Máquinas</h2>
-    
-    {% for p in pedidos %}
-        <div style="border:1px solid #0f0; padding:15px; margin-top:10px; background:#000;">
-            <p><b>ID:</b> {{ p[0] }}</p>
-            <p><b>Status:</b> {{ p[2] }}</p>
-            
-            {% if p[2] == 'AGUARDANDO PAGAMENTO' %}
-                <p style="color:yellow;">Pagamento via Rede <b>Polygon</b></p>
-                
-                <div style="margin-bottom:15px;">
-                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=ethereum:{{ p[1] }}@137?value={{ p[3] }}&color=00ff00&bgcolor=000000" alt="QR Code">
-                </div>
+<body>
 
-                <div style="background:#222; padding:15px; border:1px solid #444; display:inline-block; min-width:300px;">
-                    <p style="margin:0 0 5px 0; font-size:12px; color:#aaa;">Endereço:</p>
-                    <code style="word-break:break-all;">{{ p[1] }}</code> 
-                    <button onclick="copy('{{ p[1] }}', this)" style="margin-left:10px; cursor:pointer; background:#444; color:#fff; border:none; padding:2px 5px;">Copiar</button>
-                    
-                    <p style="margin:15px 0 5px 0; font-size:12px; color:#aaa;">Valor EXATO em POL:</p>
-                    <code style="font-size:18px; color:#fff;">{{ p[3] }}</code>
-                    <button onclick="copy('{{ p[3] }}', this)" style="margin-left:10px; cursor:pointer; background:#444; color:#fff; border:none; padding:2px 5px;">Copiar</button>
-                </div>
-
-                <p style="font-size:12px; color:#aaa; margin-top:10px;">
-                    ⚡ O sistema detecta o pagamento automaticamente em até 1 minuto após a confirmação na rede.
-                </p>
-            {% endif %}
+    <nav>
+        <div>
+            <b>user@crappy-lxc:~/dashboard$</b><span class="blink">_</span>
         </div>
-    {% endfor %}
+        <div class="nav-links">
+            <a href="/">/home</a>
+            <a href="/dash" style="color: white; border-bottom: 1px solid white;">/dashboard</a>
+            <a href="/" style="color: #ff5555;">[ Exit ]</a>
+        </div>
+    </nav>
+
+    <div class="container">
+        <h1>> ./panel_control.sh</h1>
+        <p>Welcome to your control panel. Resource allocation is strictly enforced. No refunds.</p>
+
+        <div class="deploy-box">
+            <div class="deploy-info">
+                <h3 style="border-left: none;">[ INSTANTIATE NEW NODE ]</h3>
+                <p><b>Plan:</b> Scrap (64MB RAM / 0.2 vCPU armhf)<br>
+                <b>Cost:</b> ${{ preco_usd }} USD (~{{ preco_pol }} POL)</p>
+            </div>
+            <div class="deploy-action">
+                <form action="/comprar" method="POST">
+                    <button type="submit" class="btn">> DEPLOY SCRAP NODE</button>
+                </form>
+            </div>
+        </div>
+
+        <h2>> lxc list --project user_space</h2>
+        
+        {% if not pedidos %}
+            <p style="color: var(--light-gray);">> No instances found in your account.</p>
+        {% endif %}
+
+        {% for p in pedidos %}
+            <div class="instance-card">
+                <div class="instance-header">
+                    <div class="instance-id">ID: {{ p[0] }}</div>
+                    <div>
+                        {% if p[2] == 'ATIVA' %}
+                            <span class="status status-active">[ ONLINE ]</span>
+                        {% elif p[2] == 'PENDING PAYMENT' %}
+                            <span class="status status-pending">[ PENDING PAYMENT ]</span>
+                        {% else %}
+                            <span class="status status-pending">[ {{ p[2] }} ]</span>
+                        {% endif %}
+                    </div>
+                </div>
+                
+                {% if p[2] == 'PENDING PAYMENT' %}
+                    <p style="color: yellow; margin-top: 0;">> INVOICE GENERATED. Awaiting deposit on <b>Polygon (MATIC)</b> network.</p>
+                    
+                    <div class="payment-box">
+                        <div>
+                            <img class="qr-code" src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=ethereum:{{ p[1] }}@137?value={{ p[5] }}&color=00ff00&bgcolor=000000" alt="QR Code">
+                        </div>
+                        
+                        <div class="payment-details">
+                            <p style="margin: 0 0 5px 0; font-size: 0.8em; color: var(--light-gray);">Wallet Address (Polygon Network):</p>
+                            <div class="crypto-data">
+                                <code>{{ p[1] }}</code> 
+                                <button onclick="copy('{{ p[1] }}', this)" class="copy-btn">Copy</button>
+                            </div>
+
+                            <p style="margin: 10px 0 5px 0; font-size: 0.8em; color: var(--light-gray);">Exact Amount in POL:</p>
+                            <div class="crypto-data">
+                                <code style="color: yellow; font-weight: bold;">{{ p[3] }}</code>
+                                <button onclick="copy('{{ p[3] }}', this)" class="copy-btn">Copy</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <form action="/apagar_vps/{{ p[0] }}" method="POST" style="margin-top: 15px;">
+                        <button type="submit" class="btn-action btn-danger">[ X ] CANCEL ORDER</button>
+                    </form>
+
+                    <p style="font-size: 0.8em; color: var(--light-gray); margin-top: 15px;">
+                        ⚡ System auto-detects payment in ~1 minute after blockchain confirmation. Keep this page open or check your email.
+                    </p>
+                {% elif p[2] == 'ATIVA' %}
+                    
+                    <div class="action-bar">
+                        <button class="btn-action btn-start" onclick="alert('Starting instance...')">[ > ] START</button>
+                        <button class="btn-action btn-stop" onclick="alert('Sending SIGTERM...')">[ || ] STOP</button>
+                        <button class="btn-action btn-reboot" onclick="alert('Rebooting container...')">[ * ] REBOOT</button>
+                        <button class="btn-action btn-danger" onclick="alert('Warning: OS will be wiped!')">[ ! ] REINSTALL</button>
+                        
+                        <form action="/apagar_vps/{{ p[0] }}" method="POST" style="margin-left: auto; display: inline-block;">
+                            <button type="submit" class="btn-action btn-danger" onclick="return confirm('WARNING: Are you sure you want to DESTROY this instance? This cannot be undone.')">[ X ] DESTROY</button>
+                        </form>
+                    </div>
+
+                    <p style="margin-top: 5px;">> Network isolation active. Subdomain linked.</p>
+                    <code style="color: var(--light-gray); background: #000; padding: 10px; display: block; border: 1px solid var(--gray);">
+                        Check your email for Root Password and native IPv6 assignment.
+                    </code>
+
+                    <button class="btn btn-console" onclick="alert('Connecting to TTY via WebSockets...')">
+                        [ >_ ] OPEN WEB CONSOLE
+                    </button>
+
+                {% endif %}
+            </div>
+        {% endfor %}
+    </div>
+
+    <footer>
+        <p>&copy; 2026 lxc.ovh - Dashboard Engine</p>
+    </footer>
 
     <script>
         function copy(texto, btn) {
             navigator.clipboard.writeText(texto);
             const original = btn.innerText;
-            btn.innerText = "Copiado!";
-            btn.style.background = "green";
+            btn.innerText = "Copied!";
+            btn.style.background = "var(--green)";
+            btn.style.color = "black";
             setTimeout(() => {
                 btn.innerText = original;
                 btn.style.background = "#444";
+                btn.style.color = "white";
             }, 2000);
         }
     </script>
