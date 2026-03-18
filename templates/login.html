@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Crappy LXC - Auth</title>
+    <style>
+        body { background: #0a0a0a; color: #00ff00; font-family: 'Courier New', monospace; padding: 20px; }
+        .container { max-width: 600px; margin: auto; border: 1px dashed #00ff00; padding: 20px; }
+        nav { border-bottom: 1px dashed #333; padding-bottom: 15px; margin-bottom: 20px; font-weight: bold; }
+        nav a { color: yellow; text-decoration: none; margin-right: 15px; }
+        nav a:hover { color: #fff; background: #333; }
+        input, button { background: #111; color: #00ff00; border: 1px solid #00ff00; padding: 10px; margin: 5px 0; width: 100%; font-family: inherit; box-sizing: border-box; }
+        button { cursor: pointer; font-weight: bold; }
+        button:hover { background: #00ff00; color: #000; }
+        .alert { color: yellow; margin-bottom: 20px; }
+        .checkbox-container { display: flex; align-items: start; margin: 15px 0; font-size: 0.8em; color: #aaa; text-align: left; }
+        .checkbox-container input { width: auto; margin-right: 10px; margin-top: 3px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <nav>
+            <a href="/">[ ~/home ]</a>
+            <a href="/hosting">[ /hosting ]</a>
+            <a href="/vps">[ /vps ]</a>
+            <a href="/tos">[ /tos ]</a>
+            <a href="/login" style="color: #fff;">[ ./login.sh ]</a>
+        </nav>
+
+        <h2>> root@crappy-lxc:~# ./auth.sh</h2>
+        
+        {% if msg %}
+        <div class="alert">> STATUS: {{ msg }}</div>
+        {% endif %}
+
+        <form method="POST" action="/registar">
+            <input type="email" name="email" placeholder="E-mail" required>
+            <input type="password" name="pw" placeholder="Password" required>
+            
+            <div class="checkbox-container">
+                <input type="checkbox" id="tos" name="tos" required>
+                <label for="tos">I accept the <a href="/tos" target="_blank" style="color: cyan;">Terms of Service</a>. I understand that abuse results in instant termination.</label>
+            </div>
+
+            <button type="submit" formaction="/login">LOGIN</button>
+            <button type="submit" formaction="/registar">REGISTER</button>
+        </form>
+    </div>
+</body>
+</html>

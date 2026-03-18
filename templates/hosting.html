@@ -1,32 +1,37 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Crappy LXC - Home</title>
+    <title>Crappy LXC - Hosting Specs</title>
     <style>
         body { background: #0a0a0a; color: #00ff00; font-family: 'Courier New', monospace; padding: 20px; line-height: 1.6; }
         .container { max-width: 800px; margin: auto; border: 1px dashed #00ff00; padding: 20px; }
         nav { border-bottom: 1px dashed #333; padding-bottom: 15px; margin-bottom: 20px; font-weight: bold; }
         nav a { color: yellow; text-decoration: none; margin-right: 15px; }
         nav a:hover { color: #fff; background: #333; }
-        .hero { color: #ff5555; }
+        ul { color: #aaa; }
+        li span { color: #00ff00; font-weight: bold; }
     </style>
 </head>
 <body>
     <div class="container">
         <nav>
             <a href="/">[ ~/home ]</a>
-            <a href="/hosting">[ /hosting ]</a>
+            <a href="/hosting" style="color: #fff;">[ /hosting ]</a>
             <a href="/vps">[ /vps ]</a>
             <a href="/tos">[ /tos ]</a>
             <a href="/login">[ ./login.sh ]</a>
         </nav>
 
-        <h1 class="hero">> WELCOME TO CRAPPY LXC_</h1>
-        <p>This is not AWS. This is not DigitalOcean.</p>
-        <p>This is a Banana Pi M1 sitting in a living room somewhere in Brazil, running tiny Linux Containers (LXC).</p>
-        <p>It's cheap. It's decentralized. It might go offline if someone unplugs the wrong cable. Like my son.</p>
-        <br>
-        <p>> <a href="/vps">Click here to see pricing</a> or <a href="/login">Authenticate</a>.</p>
+        <h2>> cat /proc/cpuinfo && free -m</h2>
+        <p>Our "Data Center" is literally a single SBC (Single Board Computer) running bare-metal LXC.</p>
+        
+        <ul>
+            <li><span>Node Hardware:</span> Banana Pi M1</li>
+            <li><span>CPU Architecture:</span> ARM Cortex-A7 (armhf)</li>
+            <li><span>Network:</span> IPv6 Only (Drop-bridge isolation), NAT IPv4</li>
+            <li><span>Container Type:</span> Unprivileged LXC (Debian/Alpine)</li>
+            <li><span>Uptime Guarantee:</span> Absolutely None.</li>
+        </ul>
     </div>
 </body>
 </html>

