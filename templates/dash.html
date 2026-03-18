@@ -37,8 +37,8 @@
         .btn-reboot:hover { background: orange; color: black; border-color: orange; }
         .btn-danger:hover { background: red; color: white; border-color: red; }
 
-        .btn-console { width: 100%; background: #000; color: var(--green); border: 1px dashed var(--green); padding: 15px; margin-top: 15px; font-size: 1.1em; }
-        .btn-console:hover { background: var(--green); color: #000; }
+        .btn-console { width: 100%; background: #000; color: var(--green); border: 1px dashed var(--green); padding: 15px; margin-top: 15px; font-size: 1.1em; text-align: center; display: block; box-sizing: border-box; }
+        .btn-console:hover { background: var(--green); color: #000; text-decoration: none; }
 
         .payment-box { display: flex; flex-wrap: wrap; gap: 20px; background: #050505; border: 1px solid var(--gray); padding: 20px; margin-top: 10px; }
         .qr-code { border: 2px solid var(--green); padding: 5px; background: #000; width: 150px; height: 150px; }
@@ -63,7 +63,7 @@
         <div class="nav-links">
             <a href="/">/home</a>
             <a href="/dash" style="color: white; border-bottom: 1px solid white;">/dashboard</a>
-            <a href="/" style="color: #ff5555;">[ Exit ]</a>
+            <a href="/login" style="color: #ff5555;">[ Exit ]</a>
         </div>
     </nav>
 
@@ -138,10 +138,17 @@
                 {% elif p[2] == 'ATIVA' %}
                     
                     <div class="action-bar">
-                        <button class="btn-action btn-start" onclick="alert('Starting instance...')">[ > ] START</button>
-                        <button class="btn-action btn-stop" onclick="alert('Sending SIGTERM...')">[ || ] STOP</button>
-                        <button class="btn-action btn-reboot" onclick="alert('Rebooting container...')">[ * ] REBOOT</button>
-                        <button class="btn-action btn-danger" onclick="alert('Warning: OS will be wiped!')">[ ! ] REINSTALL</button>
+                        <form action="/control_vps/{{ p[0] }}/start" method="POST" style="margin: 0; padding: 0;">
+                            <button type="submit" class="btn-action btn-start">[ > ] START</button>
+                        </form>
+                        <form action="/control_vps/{{ p[0] }}/stop" method="POST" style="margin: 0; padding: 0;">
+                            <button type="submit" class="btn-action btn-stop">[ || ] STOP</button>
+                        </form>
+                        <form action="/control_vps/{{ p[0] }}/restart" method="POST" style="margin: 0; padding: 0;">
+                            <button type="submit" class="btn-action btn-reboot">[ * ] REBOOT</button>
+                        </form>
+                        
+                        <button class="btn-action btn-danger" onclick="alert('Feature under development!')" type="button">[ ! ] REINSTALL</button>
                         
                         <form action="/apagar_vps/{{ p[0] }}" method="POST" style="margin-left: auto; display: inline-block;">
                             <button type="submit" class="btn-action btn-danger" onclick="return confirm('WARNING: Are you sure you want to DESTROY this instance? This cannot be undone.')">[ X ] DESTROY</button>
@@ -149,13 +156,14 @@
                     </div>
 
                     <p style="margin-top: 5px;">> Network isolation active. Subdomain linked.</p>
-                    <code style="color: var(--light-gray); background: #000; padding: 10px; display: block; border: 1px solid var(--gray);">
-                        Check your email for Root Password and native IPv6 assignment.
-                    </code>
+                    
+                    <div id="ip-info-{{ p[0] }}" style="color: yellow; margin: 15px 0; background: #222; padding: 10px; border: 1px dashed #555;">
+                        > Polling network interfaces...
+                    </div>
 
-                    <button class="btn btn-console" onclick="alert('Connecting to TTY via WebSockets...')">
+                    <a href="/console/{{ p[0] }}" target="_blank" class="btn btn-console">
                         [ >_ ] OPEN WEB CONSOLE
-                    </button>
+                    </a>
 
                 {% endif %}
             </div>
@@ -179,6 +187,31 @@
                 btn.style.color = "white";
             }, 2000);
         }
+
+        // Script para buscar IPs e exibir na tela do Dash
+        document.addEventListener("DOMContentLoaded", function() {
+            const vpsAtivas = [
+                {% for p in pedidos %}
+                    {% if p[2] == 'ATIVA' %}"{{ p[0] }}",{% endif %}
+                {% endfor %}
+            ];
+            
+            vpsAtivas.forEach(id => {
+                fetch(`/api/status/${id}`)
+                    .then(r => r.json())
+                    .then(data => {
+                        let divIp = document.getElementById(`ip-info-${id}`);
+                        if(data.ipv4 && data.ipv4.length > 0 || data.ipv6 && data.ipv6.length > 0) {
+                            let ipsV4 = (data.ipv4 || []).join(', ');
+                            let ipsV6 = (data.ipv6 || []).filter(ip => !ip.startsWith('fe80')).join(', ');
+                            divIp.innerHTML = `> <b>IPv4 NAT:</b> ${ipsV4 || 'N/A'}<br>> <b>IPv6 Public:</b> ${ipsV6 || 'N/A'}`;
+                        } else {
+                            divIp.innerHTML = "> Interface is down or waiting for DHCP/NDP...";
+                        }
+                    })
+                    .catch(err => console.log(err));
+            });
+        });
     </script>
 </body>
 </html>

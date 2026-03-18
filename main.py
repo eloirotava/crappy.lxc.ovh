@@ -8,12 +8,13 @@ import uuid
 import os
 import asyncio
 import secrets
+import httpx
 from dotenv import load_dotenv
 
 # Utilitários do projeto
 from crypto_utils import gerar_carteira, verificar_pagamento_pol, calcular_pol_necessario, varrer_carteira, w3
 from email_utils import enviar_email_confirmacao, enviar_email_pagamento, enviar_email_deploy
-from lxc_client import chamar_agent_banana_pi
+from lxc_client import chamar_agent_banana_pi, controlar_vps
 from log_manager import registrar_log
 
 load_dotenv()
@@ -25,6 +26,8 @@ templates = Jinja2Templates(directory="templates")
 # Configurações de Ambiente
 MINHA_CARTEIRA_PRINCIPAL = os.getenv("MINHA_CARTEIRA_PRINCIPAL")
 BASE_URL = os.getenv("BASE_URL", "http://127.0.0.1:8000")
+AGENT_URL = os.getenv("AGENT_URL", "https://server-1.rotava.com")
+API_TOKEN = os.getenv("API_TOKEN", "mudar123")
 PRECO_PROMO_USD = 0.10
 
 # Segurança do Painel /ops
@@ -125,7 +128,6 @@ async def dash(request: Request):
     email = request.cookies.get("sessao")
     if not email: return RedirectResponse("/login")
     conn = sqlite3.connect("db.sqlite")
-    # Esconde as deletadas do Dashboard do cliente
     pedidos = conn.execute("SELECT id, carteira, status, preco_pol FROM vps WHERE email=? AND status != 'DELETED'", (email,)).fetchall()
     conn.close()
     return templates.TemplateResponse("dash.html", {"request": request, "pedidos": pedidos})
@@ -145,24 +147,72 @@ async def comprar(request: Request, bg_tasks: BackgroundTasks):
     return RedirectResponse(url="/dash", status_code=303)
 
 @app.post("/apagar_vps/{id_vps}")
-async def apagar_vps(id_vps: str, request: Request):
+async def apagar_vps(id_vps: str, request: Request, bg_tasks: BackgroundTasks):
     email = request.cookies.get("sessao")
     if not email: return RedirectResponse("/login")
     conn = sqlite3.connect("db.sqlite")
-    # 🛡️ SOFT DELETE: Preserva a chave privada no banco
     conn.execute("UPDATE vps SET status = 'DELETED' WHERE id=? AND email=?", (id_vps, email))
     conn.commit()
     conn.close()
-    registrar_log("SOFT_DELETE", f"User removeu UI da {id_vps}", "INFO", email)
+    bg_tasks.add_task(controlar_vps, id_vps, "delete")
+    registrar_log("SOFT_DELETE", f"User destruiu a {id_vps}", "INFO", email)
+    return RedirectResponse(url="/dash", status_code=303)
+
+@app.post("/control_vps/{id_vps}/{acao}")
+async def painel_controle_vps(id_vps: str, acao: str, request: Request, bg_tasks: BackgroundTasks):
+    email = request.cookies.get("sessao")
+    if not email: return RedirectResponse("/login")
+    conn = sqlite3.connect("db.sqlite")
+    vps = conn.execute("SELECT id FROM vps WHERE id=? AND email=? AND status='ATIVA'", (id_vps, email)).fetchone()
+    conn.close()
+    if vps and acao in ["start", "stop", "restart"]:
+        bg_tasks.add_task(controlar_vps, id_vps, acao)
+        registrar_log("LXC_POWER", f"Ordem {acao} enviada para {id_vps}", "INFO", email)
     return RedirectResponse(url="/dash", status_code=303)
 
 # ==========================================
-# LOGICA DE VIGIA E DEPLOY (O CÉREBRO)
+# TERMINAL WEB E STATUS DINÂMICO
+# ==========================================
+
+@app.get("/api/status/{id_vps}")
+async def get_vps_status(id_vps: str, request: Request):
+    """Busca o IP em tempo real da Banana Pi para injetar no JS do Dashboard"""
+    email = request.cookies.get("sessao")
+    if not email: return {"error": "unauthorized"}
+    
+    conn = sqlite3.connect("db.sqlite")
+    vps = conn.execute("SELECT id FROM vps WHERE id=? AND email=?", (id_vps, email)).fetchone()
+    conn.close()
+    if not vps: return {"error": "not found"}
+
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{AGENT_URL}/status/{id_vps}", headers={"X-API-Key": API_TOKEN})
+            return resp.json()
+    except Exception:
+        return {"error": "agent unreachable"}
+
+@app.get("/console/{id_vps}", response_class=HTMLResponse)
+async def web_console(id_vps: str, request: Request):
+    """Renderiza a interface do Terminal Web no navegador do cliente"""
+    email = request.cookies.get("sessao")
+    if not email: return RedirectResponse("/login")
+    
+    conn = sqlite3.connect("db.sqlite")
+    vps = conn.execute("SELECT id FROM vps WHERE id=? AND email=? AND status='ATIVA'", (id_vps, email)).fetchone()
+    conn.close()
+    if not vps: return RedirectResponse("/dash")
+    
+    return templates.TemplateResponse("console.html", {
+        "request": request, "vps_id": id_vps, "agent_url": AGENT_URL, "token": API_TOKEN
+    })
+
+# ==========================================
+# LOGICA DE VIGIA E DEPLOY
 # ==========================================
 
 async def vigiar_e_implementar(id_pedido, endereco, email, valor_esperado_pol):
-    for _ in range(120): # Monitora por 1 hora
-        # 🛡️ CHECAGEM DE INTERRUPÇÃO: Se já foi ativa manualmente ou deletada, para a vigia.
+    for _ in range(120):
         conn = sqlite3.connect("db.sqlite")
         status_vps = conn.execute("SELECT status FROM vps WHERE id = ?", (id_pedido,)).fetchone()[0]
         conn.close()
@@ -171,7 +221,6 @@ async def vigiar_e_implementar(id_pedido, endereco, email, valor_esperado_pol):
             registrar_log("VIGIA_STOP", f"Task encerrada para {id_pedido} (Status: {status_vps})", "INFO", email)
             return
 
-        # Verifica se o pagamento caiu
         if verificar_pagamento_pol(endereco, valor_esperado_pol):
             conn = sqlite3.connect("db.sqlite")
             cursor = conn.execute("SELECT chave_privada FROM vps WHERE id = ?", (id_pedido,))
@@ -182,11 +231,9 @@ async def vigiar_e_implementar(id_pedido, endereco, email, valor_esperado_pol):
             
             registrar_log("PAGO", f"VPS {id_pedido} recebida.", "SUCCESS", email)
 
-            # Sweep (Raspa o dinheiro com Gás Turbo)
             if MINHA_CARTEIRA_PRINCIPAL:
                 varrer_carteira(endereco, chave_privada, MINHA_CARTEIRA_PRINCIPAL)
 
-            # Deploy no LXC
             resultado = await chamar_agent_banana_pi(id_pedido)
             if resultado.get("sucesso"):
                 registrar_log("DEPLOY_OK", f"IP: {resultado.get('ip')}", "SUCCESS", email)
@@ -204,7 +251,6 @@ async def painel_ops(request: Request, admin: str = Depends(verificar_admin)):
     msg = request.query_params.get("msg", "")
     conn = sqlite3.connect("db.sqlite")
     usuarios = conn.execute("SELECT email, conf FROM users").fetchall()
-    # No OPS, mostramos TUDO, inclusive as DELETED
     vps_geral = conn.execute("SELECT id, email, status, carteira FROM vps").fetchall()
     conn.close()
     
@@ -226,7 +272,6 @@ async def force_activate(id_vps: str, bg_tasks: BackgroundTasks, admin: str = De
     if user:
         conn.execute("UPDATE vps SET status = 'MANUAL_START' WHERE id = ?", (id_vps,))
         conn.commit()
-        # Dispara o deploy sem precisar de pagamento
         bg_tasks.add_task(processar_ativacao_manual, id_vps, user[0])
     conn.close()
     registrar_log("FORCE_START", f"Admin {admin} forçou a ativação da {id_vps}", "WARNING", user[0] if user else "System")
