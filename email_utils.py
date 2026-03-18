@@ -11,6 +11,9 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASS = os.getenv("SMTP_PASS")
 
+# 🚨 A MÁGICA AQUI: Pega o SENDER_EMAIL do .env
+SENDER_EMAIL = os.getenv("SENDER_EMAIL", SMTP_USER)
+
 def enviar_email_base(destinatario, assunto, corpo_html):
     """Função base que conecta no SMTP do Brevo e envia o e-mail"""
     if not SMTP_USER or not SMTP_PASS:
@@ -18,8 +21,9 @@ def enviar_email_base(destinatario, assunto, corpo_html):
         return
 
     msg = MIMEMultipart()
-    # No Brevo, o 'From' deve ser obrigatoriamente um e-mail verificado na sua conta
-    msg['From'] = f"Crappy LXC <{SMTP_USER}>"
+    
+    # 🚨 AGORA USA O SENDER CORRETO!
+    msg['From'] = f"Crappy LXC <{SENDER_EMAIL}>"
     msg['To'] = destinatario
     msg['Subject'] = assunto
 
@@ -43,7 +47,7 @@ def enviar_email_base(destinatario, assunto, corpo_html):
 
     try:
         # Conexão segura via TLS
-        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT)
+        server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)
         server.starttls()
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)

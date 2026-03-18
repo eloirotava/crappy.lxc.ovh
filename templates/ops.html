@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crappy LXC - OPS Panel</title>
+    <style>
+        :root { --bg: #0a0a0a; --green: #00ff00; --gray: #333333; --light-gray: #aaaaaa; }
+        body { background-color: var(--bg); color: var(--green); font-family: 'Courier New', Courier, monospace; margin: 0; padding: 20px; line-height: 1.4; }
+        h1, h2 { border-bottom: 1px dashed var(--green); padding-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 40px; font-size: 0.9em; }
+        th, td { border: 1px solid var(--gray); padding: 8px; text-align: left; }
+        th { background-color: #111; color: yellow; }
+        .SUCCESS { color: #00ff00; font-weight: bold; }
+        .WARNING { color: yellow; }
+        .ERROR, .CRITICAL { color: #ff5555; font-weight: bold; }
+        .INFO { color: var(--light-gray); }
+    </style>
+</head>
+<body>
+    <h1>> root@crappy-lxc:/ops# ./monitor.sh</h1>
+    
+    <h2>[1] SYSTEM LOGS (Last 50)</h2>
+    <table>
+        <tr>
+            <th>TIMESTAMP</th>
+            <th>LEVEL</th>
+            <th>EVENT</th>
+            <th>DETAILS</th>
+            <th>TARGET</th>
+        </tr>
+        {% for log in logs %}
+        <tr>
+            <td>{{ log[0] }}</td>
+            <td class="{{ log[1] }}">{{ log[1] }}</td>
+            <td>{{ log[2] }}</td>
+            <td>{{ log[3] }}</td>
+            <td>{{ log[4] }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <h2>[2] ACTIVE NODES & INVOICES</h2>
+    <table>
+        <tr>
+            <th>VPS ID</th>
+            <th>CLIENT EMAIL</th>
+            <th>STATUS</th>
+            <th>PRICE (POL)</th>
+            <th>WALLET (EVM)</th>
+        </tr>
+        {% for v in vps %}
+        <tr>
+            <td>{{ v[0] }}</td>
+            <td>{{ v[1] }}</td>
+            <td class="{% if v[3] == 'ATIVA' %}SUCCESS{% else %}WARNING{% endif %}">{{ v[3] }}</td>
+            <td>{{ v[4] }}</td>
+            <td style="font-size: 0.8em; color: var(--light-gray);">{{ v[2] }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <h2>[3] REGISTERED USERS</h2>
+    <table>
+        <tr>
+            <th>EMAIL</th>
+            <th>CONFIRMED</th>
+            <th>ACTION</th>
+        </tr>
+        {% for u in usuarios %}
+        <tr>
+            <td>{{ u[0] }}</td>
+            <td class="{% if u[1] %}SUCCESS{% else %}WARNING{% endif %}">{{ "YES" if u[1] else "NO" }}</td>
+            <td>
+                {% if not u[1] %}
+                <a href="/admin/approve/{{ u[0] }}" style="color: yellow; text-decoration: underline;" target="_blank">FORCE APPROVE</a>
+                {% else %}
+                -
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+
+</body>
+</html>
