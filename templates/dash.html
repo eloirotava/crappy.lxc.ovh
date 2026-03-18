@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Painel - Crappi LXC</title>
+</head>
+<body style="background:#111; color:#0f0; font-family:monospace; padding:50px;">
+    <h1>O teu Bunker</h1>
+    
+    <div style="border:1px dashed #0f0; padding:15px; margin-bottom:20px; display:inline-block;">
+        <h3>Comprar VPS (Promoção)</h3>
+        <p>Valor: ${{ preco_usd }} USD <br> <b>Equivalente a: ~{{ preco_pol }} POL</b></p>
+        <form action="/comprar" method="POST">
+            <button style="background:green; color:white; padding:10px 20px; font-weight:bold; cursor:pointer; border:none;">LANÇAR FOSSIL LXC</button>
+        </form>
+    </div>
+    
+    <hr style="border-color:#333;">
+    <h2>As tuas Máquinas</h2>
+    
+    {% for p in pedidos %}
+        <div style="border:1px solid #0f0; padding:15px; margin-top:10px; background:#000;">
+            <p><b>ID:</b> {{ p[0] }}</p>
+            <p><b>Status:</b> {{ p[2] }}</p>
+            
+            {% if p[2] == 'AGUARDANDO PAGAMENTO' %}
+                <p style="color:yellow;">Pagamento via Rede <b>Polygon</b></p>
+                
+                <div style="margin-bottom:15px;">
+                    <img src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=ethereum:{{ p[1] }}@137?value={{ p[3] }}&color=00ff00&bgcolor=000000" alt="QR Code">
+                </div>
+
+                <div style="background:#222; padding:15px; border:1px solid #444; display:inline-block; min-width:300px;">
+                    <p style="margin:0 0 5px 0; font-size:12px; color:#aaa;">Endereço:</p>
+                    <code style="word-break:break-all;">{{ p[1] }}</code> 
+                    <button onclick="copy('{{ p[1] }}', this)" style="margin-left:10px; cursor:pointer; background:#444; color:#fff; border:none; padding:2px 5px;">Copiar</button>
+                    
+                    <p style="margin:15px 0 5px 0; font-size:12px; color:#aaa;">Valor EXATO em POL:</p>
+                    <code style="font-size:18px; color:#fff;">{{ p[3] }}</code>
+                    <button onclick="copy('{{ p[3] }}', this)" style="margin-left:10px; cursor:pointer; background:#444; color:#fff; border:none; padding:2px 5px;">Copiar</button>
+                </div>
+
+                <p style="font-size:12px; color:#aaa; margin-top:10px;">
+                    ⚡ O sistema detecta o pagamento automaticamente em até 1 minuto após a confirmação na rede.
+                </p>
+            {% endif %}
+        </div>
+    {% endfor %}
+
+    <script>
+        function copy(texto, btn) {
+            navigator.clipboard.writeText(texto);
+            const original = btn.innerText;
+            btn.innerText = "Copiado!";
+            btn.style.background = "green";
+            setTimeout(() => {
+                btn.innerText = original;
+                btn.style.background = "#444";
+            }, 2000);
+        }
+    </script>
+</body>
+</html>

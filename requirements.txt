@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+jinja2
+python-multipart
+web3
+qrcode[pil]
+httpx
+python-dotenv
+requests

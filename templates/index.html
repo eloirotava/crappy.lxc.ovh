@@ -1,0 +1,22 @@
+<!DOCTYPE html><html><body style="background:#111; color:#0f0; font-family:monospace; padding:50px; text-align:center;">
+    <h1>Crappi LXC OVH</h1>
+    <p style="color:yellow;">{{ msg }}</p>
+    
+    <div style="border:1px solid #0f0; padding:20px; display:inline-block; margin-bottom:20px;">
+        <h3>Já tens conta?</h3>
+        <form action="/login" method="POST">
+            <input name="email" placeholder="Email" required><br><br>
+            <input type="password" name="pw" placeholder="Senha" required><br><br>
+            <button style="background:#0f0; color:#000; padding:5px 15px; font-weight:bold; cursor:pointer;">Login</button>
+        </form>
+    </div>
+    <br>
+    <div style="border:1px solid #555; padding:20px; display:inline-block;">
+        <h3>Novo aqui?</h3>
+        <form action="/registar" method="POST">
+            <input name="email" placeholder="Novo Email" required><br><br>
+            <input type="password" name="pw" placeholder="Nova Senha" required><br><br>
+            <button style="background:#444; color:#fff; padding:5px 15px; cursor:pointer;">Criar Conta</button>
+        </form>
+    </div>
+</body></html>
