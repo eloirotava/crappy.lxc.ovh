@@ -69,15 +69,18 @@ def init_db():
         conn.execute("ALTER TABLE nodes ADD COLUMN preco_renew_usd REAL DEFAULT 0.10")
         conn.execute("ALTER TABLE nodes ADD COLUMN preco_ano_usd REAL DEFAULT 1.00")
         conn.execute("UPDATE nodes SET preco_renew_usd = preco_usd, preco_ano_usd = preco_usd * 10")
+    if 'descricao_hardware' not in colunas_nodes:
+        conn.execute("ALTER TABLE nodes ADD COLUMN descricao_hardware TEXT DEFAULT 'SBC Genérico (Lixo Reciclado)'")
+        conn.execute("ALTER TABLE nodes ADD COLUMN cpu_core TEXT DEFAULT '0'")
     
     cursor.execute("SELECT COUNT(*) FROM nodes")
     if cursor.fetchone()[0] == 0:
         agent_url = os.getenv("AGENT_URL", "https://server-1.rotava.com")
         agent_token = os.getenv("API_TOKEN", "mudar123")
         conn.execute("""INSERT INTO nodes 
-            (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite_vps, ram_mb, swap_mb, disk_mb, cpu_fraction) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("BananaPi (Home)", agent_url, agent_token, "armhf", 0.10, 0.10, 1.00, 10, 64, 32, 1024, "20%"))
+            (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite_vps, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("BananaPi (Home)", agent_url, agent_token, "armhf", 0.10, 0.10, 1.00, 10, 64, 32, 1024, "20%", "Allwinner A20 DDR2", "0"))
     
     conn.commit()
     conn.close()
@@ -87,16 +90,12 @@ init_db()
 def get_node_info(id_vps):
     conn = sqlite3.connect("db.sqlite")
     res = conn.execute("""
-        SELECT n.url_agente, n.token_agente, n.ram_mb, n.swap_mb, n.disk_mb 
+        SELECT n.url_agente, n.token_agente, n.ram_mb, n.swap_mb, n.disk_mb, n.cpu_fraction, n.cpu_core 
         FROM vps v JOIN nodes n ON v.node_id = n.id 
         WHERE v.id = ?
     """, (id_vps,)).fetchone()
     conn.close()
-    return res if res else (None, None, 64, 32, 1024)
-
-# ==========================================
-# ROTAS PÚBLICAS E AUTH
-# ==========================================
+    return res if res else (None, None, 64, 32, 1024, "20%", "0")
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request): return templates.TemplateResponse("index.html", {"request": request})
@@ -148,10 +147,6 @@ async def login(response: Response, email: str = Form(...), pw: str = Form(...))
     res.set_cookie(key="sessao", value=email)
     return res
 
-# ==========================================
-# PAINEL DO CLIENTE E VPS
-# ==========================================
-
 @app.get("/dash", response_class=HTMLResponse)
 async def dash(request: Request):
     email = request.cookies.get("sessao")
@@ -166,7 +161,6 @@ async def dash(request: Request):
     
     pedidos = []
     for p in pedidos_db:
-        # A MÁGICA DOS 6 DÍGITOS ACONTECE AQUI
         pedidos.append({
             "id": p[0], "carteira": p[1], "status": p[2], 
             "preco_usd": p[3], 
@@ -179,14 +173,15 @@ async def dash(request: Request):
             "node_nome": p[7], "arquitetura": p[8]
         })
     
-    nodes_db = conn.execute("SELECT id, nome, arquitetura, preco_usd, ram_mb, swap_mb, disk_mb, cpu_fraction, limite_vps FROM nodes WHERE ativo = 1").fetchall()
+    nodes_db = conn.execute("SELECT id, nome, arquitetura, preco_usd, ram_mb, swap_mb, disk_mb, cpu_fraction, limite_vps, descricao_hardware, cpu_core FROM nodes WHERE ativo = 1").fetchall()
     nodes_disponiveis = []
     for n in nodes_db:
         uso = conn.execute("SELECT COUNT(*) FROM vps WHERE node_id=? AND status NOT IN ('DELETED', 'TERMINATED')", (n[0],)).fetchone()[0]
         nodes_disponiveis.append({
             "id": n[0], "nome": n[1], "arquitetura": n[2], "preco_usd": n[3], 
             "preco_pol": f"{calcular_pol_necessario(n[3]):.6f}", 
-            "ram_mb": n[4], "swap_mb": n[5], "disk_mb": n[6], "cpu_fraction": n[7], "uso": uso, "limite": n[8], "sold_out": uso >= n[8]
+            "ram_mb": n[4], "swap_mb": n[5], "disk_mb": n[6], "cpu_fraction": n[7], "uso": uso, "limite": n[8], "sold_out": uso >= n[8],
+            "descricao_hardware": n[9], "cpu_core": n[10]
         })
     conn.close()
     return templates.TemplateResponse("dash.html", {"request": request, "pedidos": pedidos, "nodes": nodes_disponiveis})
@@ -210,7 +205,6 @@ async def comprar(request: Request, bg_tasks: BackgroundTasks, node_id: int = Fo
     id_pedido = "vps-" + str(uuid.uuid4())[:8]
     endereco, chave_privada = gerar_carteira()
     
-    # Gravamos no banco de dados com 6 casas decimais exatas
     p_pol = float(f"{calcular_pol_necessario(node[0]):.6f}")
     
     conn.execute("INSERT INTO vps (id, email, carteira, chave_privada, status, preco_pol, node_id) VALUES (?, ?, ?, ?, ?, ?, ?)", 
@@ -238,7 +232,6 @@ async def verificar_pagamento(id_vps: str, request: Request, bg_tasks: Backgroun
     
     endereco, chave_privada, status, validade, preco_usd, preco_renew_usd, preco_ano_usd = vps
     
-    # Compara a blockchain usando as mesmas 6 casas de precisão do site
     preco_pol_base = float(f"{calcular_pol_necessario(preco_usd):.6f}")
     preco_pol_renew = float(f"{calcular_pol_necessario(preco_renew_usd):.6f}")
     preco_pol_ano = float(f"{calcular_pol_necessario(preco_ano_usd):.6f}")
@@ -285,7 +278,7 @@ async def verificar_pagamento(id_vps: str, request: Request, bg_tasks: Backgroun
         if status == 'PENDING PAYMENT':
             bg_tasks.add_task(processar_ativacao_apos_pagamento, id_vps, email)
         elif status == 'SUSPENDED':
-            agent_url, agent_token, _, _, _ = get_node_info(id_vps)
+            agent_url, agent_token, _, _, _, _, _ = get_node_info(id_vps)
             bg_tasks.add_task(controlar_vps, id_vps, "start", agent_url, agent_token)
             
         return RedirectResponse(url=f"/dash?msg=PAYMENT+CONFIRMED!+Added+{dias_add}+days.", status_code=303)
@@ -294,9 +287,9 @@ async def verificar_pagamento(id_vps: str, request: Request, bg_tasks: Backgroun
         return RedirectResponse(url="/dash?msg=NO+FUNDS+FOUND.+Blockchain+may+take+a+minute.+Try+again.", status_code=303)
 
 async def processar_ativacao_apos_pagamento(id_vps, email):
-    agent_url, agent_token, ram, swap, disk = get_node_info(id_vps)
+    agent_url, agent_token, ram, swap, disk, cpu, cpu_core = get_node_info(id_vps)
     if not agent_url: return
-    resultado = await chamar_agent_banana_pi(id_vps, agent_url, agent_token, ram_mb=ram, swap_mb=swap, disk_mb=disk)
+    resultado = await chamar_agent_banana_pi(id_vps, agent_url, agent_token, ram_mb=ram, swap_mb=swap, disk_mb=disk, cpu_fraction=cpu, cpu_core=cpu_core)
     if resultado.get("sucesso"):
         registrar_log("DEPLOY_OK", f"IP: {resultado.get('ip')}", "SUCCESS", email)
         enviar_email_deploy(email, id_vps, resultado.get("ip"), resultado.get("senha"))
@@ -306,7 +299,7 @@ async def apagar_vps(id_vps: str, request: Request, bg_tasks: BackgroundTasks):
     email = request.cookies.get("sessao")
     if not email: return RedirectResponse("/login")
     
-    agent_url, agent_token, _, _, _ = get_node_info(id_vps)
+    agent_url, agent_token, _, _, _, _, _ = get_node_info(id_vps)
     conn = sqlite3.connect("db.sqlite")
     conn.execute("UPDATE vps SET status = 'DELETED' WHERE id=? AND email=?", (id_vps, email))
     conn.commit()
@@ -325,21 +318,17 @@ async def painel_controle_vps(id_vps: str, acao: str, request: Request, bg_tasks
     conn.close()
     
     if vps and acao in ["start", "stop", "restart"]:
-        agent_url, agent_token, _, _, _ = get_node_info(id_vps)
+        agent_url, agent_token, _, _, _, _, _ = get_node_info(id_vps)
         if agent_url:
             bg_tasks.add_task(controlar_vps, id_vps, acao, agent_url, agent_token)
             registrar_log("LXC_POWER", f"Ordem {acao} enviada para {id_vps}", "INFO", email)
     return RedirectResponse(url="/dash", status_code=303)
 
-# ==========================================
-# TERMINAL WEB E STATUS DINÂMICO
-# ==========================================
-
 @app.get("/api/status/{id_vps}")
 async def get_vps_status(id_vps: str, request: Request):
     email = request.cookies.get("sessao")
     if not email: return {"error": "unauthorized"}
-    agent_url, agent_token, _, _, _ = get_node_info(id_vps)
+    agent_url, agent_token, _, _, _, _, _ = get_node_info(id_vps)
     if not agent_url: return {"error": "not found"}
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -356,12 +345,8 @@ async def web_console(id_vps: str, request: Request):
     vps = conn.execute("SELECT id FROM vps WHERE id=? AND email=? AND status='ATIVA'", (id_vps, email)).fetchone()
     conn.close()
     if not vps: return RedirectResponse("/dash")
-    agent_url, agent_token, _, _, _ = get_node_info(id_vps)
+    agent_url, agent_token, _, _, _, _, _ = get_node_info(id_vps)
     return templates.TemplateResponse("console.html", {"request": request, "vps_id": id_vps, "agent_url": agent_url, "token": agent_token})
-
-# ==========================================
-# PAINEL DE OPERAÇÕES (/ops)
-# ==========================================
 
 @app.get("/ops", response_class=HTMLResponse)
 async def painel_ops(request: Request, admin: str = Depends(verificar_admin)):
@@ -374,7 +359,7 @@ async def painel_ops(request: Request, admin: str = Depends(verificar_admin)):
         FROM vps v JOIN nodes n ON v.node_id = n.id
     """).fetchall()
     
-    nodes_db = conn.execute("SELECT id, nome, url_agente, arquitetura, preco_usd, ativo, ram_mb, swap_mb, disk_mb, cpu_fraction, limite_vps, preco_renew_usd, preco_ano_usd, token_agente FROM nodes").fetchall()
+    nodes_db = conn.execute("SELECT id, nome, url_agente, arquitetura, preco_usd, ativo, ram_mb, swap_mb, disk_mb, cpu_fraction, limite_vps, preco_renew_usd, preco_ano_usd, token_agente, descricao_hardware, cpu_core FROM nodes").fetchall()
     
     nodes = []
     for n in nodes_db:
@@ -397,13 +382,14 @@ async def ops_add_node(
     request: Request, nome: str = Form(...), url_agente: str = Form(...), token_agente: str = Form(...), 
     arquitetura: str = Form(...), preco_usd: float = Form(...), preco_renew_usd: float = Form(...), preco_ano_usd: float = Form(...), limite: int = Form(...),
     ram_mb: int = Form(...), swap_mb: int = Form(...), disk_mb: int = Form(...), cpu_fraction: str = Form(...),
+    descricao_hardware: str = Form(...), cpu_core: str = Form(...),
     admin: str = Depends(verificar_admin)
 ):
     conn = sqlite3.connect("db.sqlite")
     conn.execute("""
-        INSERT INTO nodes (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite_vps, ram_mb, swap_mb, disk_mb, cpu_fraction) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite, ram_mb, swap_mb, disk_mb, cpu_fraction))
+        INSERT INTO nodes (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite_vps, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core))
     conn.commit()
     conn.close()
     return RedirectResponse(url="/ops?msg=Node+Adicionado+com+Sucesso", status_code=303)
@@ -413,15 +399,16 @@ async def ops_edit_node(
     node_id: int, request: Request, nome: str = Form(...), url_agente: str = Form(...), token_agente: str = Form(...), 
     arquitetura: str = Form(...), preco_usd: float = Form(...), preco_renew_usd: float = Form(...), preco_ano_usd: float = Form(...), limite: int = Form(...),
     ram_mb: int = Form(...), swap_mb: int = Form(...), disk_mb: int = Form(...), cpu_fraction: str = Form(...),
+    descricao_hardware: str = Form(...), cpu_core: str = Form(...),
     admin: str = Depends(verificar_admin)
 ):
     conn = sqlite3.connect("db.sqlite")
     conn.execute("""
         UPDATE nodes SET 
             nome=?, url_agente=?, token_agente=?, arquitetura=?, preco_usd=?, preco_renew_usd=?, preco_ano_usd=?, 
-            limite_vps=?, ram_mb=?, swap_mb=?, disk_mb=?, cpu_fraction=?
+            limite_vps=?, ram_mb=?, swap_mb=?, disk_mb=?, cpu_fraction=?, descricao_hardware=?, cpu_core=?
         WHERE id=?
-    """, (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite, ram_mb, swap_mb, disk_mb, cpu_fraction, node_id))
+    """, (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core, node_id))
     conn.commit()
     conn.close()
     return RedirectResponse(url="/ops?msg=Node+Atualizado+com+Sucesso", status_code=303)
@@ -438,8 +425,8 @@ async def force_activate(id_vps: str, bg_tasks: BackgroundTasks, admin: str = De
     return RedirectResponse(url="/ops?msg=Manual+Deploy+Started", status_code=303)
 
 async def processar_ativacao_manual(id_vps, email):
-    agent_url, agent_token, ram, swap, disk = get_node_info(id_vps)
-    res = await chamar_agent_banana_pi(id_vps, agent_url, agent_token, ram_mb=ram, swap_mb=swap, disk_mb=disk)
+    agent_url, agent_token, ram, swap, disk, cpu, cpu_core = get_node_info(id_vps)
+    res = await chamar_agent_banana_pi(id_vps, agent_url, agent_token, ram_mb=ram, swap_mb=swap, disk_mb=disk, cpu_fraction=cpu, cpu_core=cpu_core)
     if res.get("sucesso"):
         conn = sqlite3.connect("db.sqlite")
         conn.execute("UPDATE vps SET status = 'ATIVA' WHERE id = ?", (id_vps,))

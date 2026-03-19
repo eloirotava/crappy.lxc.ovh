@@ -93,7 +93,9 @@
                     
                     <p style="{% if n.sold_out %}color: #666;{% endif %}"><b>Specs:</b> {{ n.cpu_fraction }} CPU / {{ n.ram_mb }}MB RAM<br>
                     <b>Storage:</b> {{ n.disk_mb }}MB DISK ({{ n.swap_mb }}MB SWAP)<br>
-                    <b style="color: cyan;">Cost:</b> ${{ n.preco_usd }} USD (~{{ n.preco_pol }} POL) / 30 Days</p>
+                    <span style="color: cyan; font-size: 0.9em;">> <b>Hardware:</b> {{ n.descricao_hardware }}</span><br>
+                    <span style="color: cyan; font-size: 0.9em;">> <b>Core Pinned:</b> CPU {{ n.cpu_core }}</span><br>
+                    <b style="color: yellow;">Cost:</b> ${{ n.preco_usd }} USD (~{{ n.preco_pol }} POL) / 30 Days</p>
                 </div>
                 
                 {% if n.sold_out %}
@@ -243,7 +245,6 @@
             });
         });
 
-        // AUTO-REFRESH A CADA 60 SEGUNDOS (Mantém a página sempre viva)
         setTimeout(() => { window.location.reload(); }, 60000);
     </script>
 </body>
