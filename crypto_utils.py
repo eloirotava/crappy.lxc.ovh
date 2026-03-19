@@ -37,7 +37,7 @@ def calcular_pol_necessario(valor_usd_desejado):
     if preco_atual <= 0.01:
         preco_atual = 0.096
     valor_em_pol = valor_usd_desejado / preco_atual
-    return round(valor_em_pol, 2)
+    return valor_em_pol
 
 def verificar_pagamento_pol(endereco, valor_esperado_pol):
     try:

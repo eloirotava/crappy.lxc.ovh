@@ -9,10 +9,18 @@
         th, td { border: 1px solid #333; padding: 8px; text-align: left; }
         th { background: #111; color: yellow; }
         .btn { padding: 4px 8px; border: 1px solid #00ff00; background: none; color: #00ff00; cursor: pointer; text-decoration: none; font-size: 11px; }
+        .btn:hover { background: #00ff00; color: black; }
         .btn-nuke { border-color: #ff5555; color: #ff5555; }
         .btn-force { border-color: #ffaa00; color: #ffaa00; }
+        .btn-edit { border-color: cyan; color: cyan; }
         .msg { color: black; background: yellow; padding: 5px; margin-bottom: 20px; font-weight: bold; }
-        .SUCCESS { color: #00ff00; } .WARNING { color: yellow; } .CRITICAL { color: #ff5555; }
+        .form-box { border: 1px dashed yellow; padding: 15px; margin-bottom: 30px; background: #111; }
+        .form-row { display: flex; gap: 10px; margin-bottom: 10px; }
+        .form-box input, .form-box select { background: #000; color: #00ff00; border: 1px solid #333; padding: 8px; width: 100%; box-sizing: border-box; }
+        
+        details.edit-node summary { display: inline-block; outline: none; }
+        details.edit-node[open] summary { border-bottom: 1px dashed cyan; margin-bottom: 10px; }
+        .edit-form-box { border: 1px dashed cyan; padding: 15px; background: #0a0a0a; margin-top: 10px;}
     </style>
 </head>
 <body>
@@ -23,28 +31,120 @@
 
     {% if msg %}<div class="msg">> {{ msg }}</div>{% endif %}
 
-    <h2>[ ACTIVE NODES ]</h2>
+    <h2>[ ADD NEW SERVER NODE ]</h2>
+    <div class="form-box">
+        <form action="/ops/add_node" method="POST">
+            <div class="form-row">
+                <input type="text" name="nome" placeholder="Node Name (ex: TV Box S905)" required>
+                <input type="text" name="url_agente" placeholder="Agent URL (ex: http://ip:5000)" required>
+                <input type="text" name="token_agente" placeholder="API Token" required>
+            </div>
+            <div class="form-row">
+                <select name="arquitetura" required>
+                    <option value="armhf">armhf (Banana Pi / RPi 32bit)</option>
+                    <option value="arm64">arm64 (TV Box S905 / RPi 64bit)</option>
+                    <option value="amd64">amd64 (VPS Tradicional)</option>
+                </select>
+                <input type="number" step="0.001" name="preco_usd" placeholder="Deploy Price USD (ex: 0.025)" required>
+                <input type="number" step="0.001" name="preco_renew_usd" placeholder="Renew 30d USD (ex: 0.025)" required>
+                <input type="number" step="0.001" name="preco_ano_usd" placeholder="Renew 1Y USD (ex: 0.25)" required>
+                <input type="number" name="limite" placeholder="Max VPS Limit (ex: 50)" required>
+            </div>
+            <div class="form-row">
+                <input type="number" name="ram_mb" placeholder="RAM Limit (MB)" required>
+                <input type="number" name="swap_mb" placeholder="Swap Limit (MB)" required>
+                <input type="number" name="disk_mb" placeholder="Disk Limit (MB)" required>
+                <input type="text" name="cpu_fraction" placeholder="CPU Text (ex: 1% CPU)" required>
+            </div>
+            <button type="submit" class="btn">> ADD NODE TO CLUSTER</button>
+        </form>
+    </div>
+
+    <h2>[ ACTIVE INFRASTRUCTURE NODES ]</h2>
+    <table>
+        <tr>
+            <th>ID</th>
+            <th>NAME</th>
+            <th>ARCH</th>
+            <th>SPECS</th>
+            <th>USAGE/LIMIT</th>
+            <th>PRICES (NEW / 30D / 1Y)</th>
+            <th>STATUS</th>
+            <th>ACTIONS</th>
+        </tr>
+        {% for n in nodes %}
+        <tr>
+            <td>{{ n[0] }}</td>
+            <td>{{ n[1] }}<br><span style="color: #666; font-size: 0.9em;">{{ n[2] }}</span></td>
+            <td style="color: cyan;">{{ n[3] }}</td>
+            <td style="color: #ccc;">{{ n[9] }} / {{ n[6] }}MB RAM / {{ n[7] }}MB SWAP / {{ n[8] }}MB DISK</td>
+            <td style="font-weight: bold; {% if n[14] >= n[10] %}color: red;{% endif %}">{{ n[14] }} / {{ n[10] }}</td>
+            <td style="color: yellow;">${{ n[4] }} / ${{ n[11] }} / ${{ n[12] }}</td>
+            <td>{% if n[5] == 1 %}[ ONLINE ]{% else %}[ OFFLINE ]{% endif %}</td>
+            <td>
+                <details class="edit-node">
+                    <summary class="btn btn-edit">[ EDIT ]</summary>
+                    <div class="edit-form-box">
+                        <form action="/ops/edit_node/{{ n[0] }}" method="POST">
+                            <div class="form-row">
+                                <input type="text" name="nome" value="{{ n[1] }}" required>
+                                <input type="text" name="url_agente" value="{{ n[2] }}" required>
+                                <input type="text" name="token_agente" value="{{ n[13] }}" required>
+                            </div>
+                            <div class="form-row">
+                                <select name="arquitetura" required>
+                                    <option value="armhf" {% if n[3]=='armhf' %}selected{% endif %}>armhf</option>
+                                    <option value="arm64" {% if n[3]=='arm64' %}selected{% endif %}>arm64</option>
+                                    <option value="amd64" {% if n[3]=='amd64' %}selected{% endif %}>amd64</option>
+                                </select>
+                                <input type="number" step="0.001" name="preco_usd" value="{{ n[4] }}" required>
+                                <input type="number" step="0.001" name="preco_renew_usd" value="{{ n[11] }}" required>
+                                <input type="number" step="0.001" name="preco_ano_usd" value="{{ n[12] }}" required>
+                                <input type="number" name="limite" value="{{ n[10] }}" required>
+                            </div>
+                            <div class="form-row">
+                                <input type="number" name="ram_mb" value="{{ n[6] }}" required>
+                                <input type="number" name="swap_mb" value="{{ n[7] }}" required>
+                                <input type="number" name="disk_mb" value="{{ n[8] }}" required>
+                                <input type="text" name="cpu_fraction" value="{{ n[9] }}" required>
+                            </div>
+                            <button type="submit" class="btn" style="border-color: cyan; color: cyan;">> SAVE CHANGES</button>
+                        </form>
+                    </div>
+                </details>
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+
+    <h2>[ ACTIVE CONTAINERS ]</h2>
     <table>
         <tr>
             <th>ID</th>
             <th>USER</th>
+            <th>NODE</th>
+            <th>VALIDITY</th>
             <th>STATUS</th>
-            <th>WALLET (EVM)</th>
             <th>ACTIONS</th>
         </tr>
         {% for v in vps %}
-        {% if v[2] != 'DELETED' %}
+        {% if v[2] != 'DELETED' and v[2] != 'TERMINATED' %}
         <tr>
             <td>{{ v[0] }}</td>
             <td>{{ v[1] }}</td>
-            <td class="{{ v[2] }}">{{ v[2] }}</td>
-            <td style="font-size: 10px; color: #666;">{{ v[3] }}</td>
+            
+            <td>{{ v[5] }}<br><span style="color:cyan;font-size:0.9em;">{{ v[6] }}</span></td>
+            
+            <td style="color: cyan;">{{ v[4] }}</td>
+            <td>
+                {% if v[2] == 'SUSPENDED' %}<span style="color:red;font-weight:bold;">SUSPENDED</span>
+                {% else %}{{ v[2] }}{% endif %}
+            </td>
             <td>
                 <form action="/ops/nuke/{{ v[0] }}" method="post" style="display:inline;">
                     <button type="submit" class="btn btn-nuke" onclick="return confirm('Confirm BAN?')">[ NUKE ]</button>
                 </form>
-                
-                {% if v[2] != 'ATIVA' %}
+                {% if v[2] != 'ATIVA' and v[2] != 'SUSPENDED' %}
                 <form action="/ops/force_activate/{{ v[0] }}" method="post" style="display:inline;">
                     <button type="submit" class="btn btn-force" onclick="return confirm('Activate WITHOUT payment?')">[ FORCE START ]</button>
                 </form>
@@ -55,26 +155,17 @@
         {% endfor %}
     </table>
 
-    <h2>[ SYSTEM LOGS ]</h2>
-    <table>
-        <tr>
-            <th>TIME</th>
-            <th>LVL</th>
-            <th>EVENT</th>
-            <th>DETAILS</th>
-            <th>USER</th>
-        </tr>
-        {% for l in logs %}
-        <tr class="{{ l[1] }}">
-            <td>{{ l[0].split(' ')[1] }}</td>
-            <td>{{ l[1] }}</td>
-            <td>{{ l[2] }}</td>
-            <td>{{ l[3][:40] }}...</td>
-            <td>{{ l[4] }}</td>
-        </tr>
-        {% endfor %}
-    </table>
-
     <p><a href="/dash" class="btn"><< BACK TO DASH</a></p>
+
+    <script>
+        // AUTO-REFRESH INTELIGENTE (Não incomoda o Sysadmin)
+        setTimeout(function reloadIfIdle() {
+            if (!document.querySelector('input:focus') && !document.querySelector('select:focus')) {
+                window.location.reload();
+            } else {
+                setTimeout(reloadIfIdle, 10000);
+            }
+        }, 60000);
+    </script>
 </body>
 </html>

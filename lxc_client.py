@@ -6,19 +6,23 @@ import httpx
 AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:5000")
 AGENT_TOKEN = os.getenv("API_TOKEN", "mudar123")
 
-async def chamar_agent_banana_pi(id_vps, distro="alpine", ram_mb=64, disk_mb=256):
+async def chamar_agent_banana_pi(id_vps, distro="alpine", ram_mb=64, swap_mb=32, disk_mb=1024):
     """
     Solicita ao agente remoto a criação do contêiner LXC real.
     """
     headers = {"X-API-Key": AGENT_TOKEN}
+    
+    # É AQUI QUE A MÁGICA ACONTECE!
+    # Se o swap_mb não estiver neste dicionário, o agente nunca vai saber que você pediu 32MB.
     payload = {
         "vps_id": id_vps,
         "distro": distro,
         "ram_mb": ram_mb,
+        "swap_mb": swap_mb,
         "disk_mb": disk_mb
     }
     
-    print(f"[AGENT] Solicitando criação da {id_vps} no servidor {AGENT_URL}...")
+    print(f"[AGENT] Solicitando criação da {id_vps} no servidor {AGENT_URL} com {swap_mb}MB de Swap...")
     
     async with httpx.AsyncClient(timeout=150.0) as client:
         try:
@@ -33,7 +37,6 @@ async def chamar_agent_banana_pi(id_vps, distro="alpine", ram_mb=64, disk_mb=256
             senha = dados.get("pass")
             
             # 2. O agente reinicia a VPS no final, o IP IPv6 pode demorar uns segundos.
-            # Vamos consultar o status em loop até ele pegar o IP.
             ip_alocado = "Aguardando Rede..."
             for _ in range(15):
                 await asyncio.sleep(2)
