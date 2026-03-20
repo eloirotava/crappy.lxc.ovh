@@ -8,7 +8,7 @@
         nav { border-bottom: 1px dashed #333; padding-bottom: 15px; margin-bottom: 20px; font-weight: bold; }
         nav a { color: yellow; text-decoration: none; margin-right: 15px; }
         nav a:hover { color: #fff; background: #333; }
-        .plan-box { border: 1px solid yellow; padding: 15px; margin-top: 20px; }
+        .plan-box { border: 1px solid yellow; padding: 15px; margin-top: 20px; background: #050505;}
     </style>
 </head>
 <body>
@@ -24,15 +24,25 @@
         <h2>> ./show_plans.sh</h2>
         <p>We only accept Web3 payments on the Polygon (POL) network. It's automated and irreversible.</p>
         
+        {% if not nodes %}
+            <p style="color: red;">> SYSTEM OFFLINE: No active VPS Nodes at the moment.</p>
+        {% endif %}
+
+        {% for n in nodes %}
         <div class="plan-box">
-            <h3 style="margin-top: 0;">[ PLAN: CRAPPY-NANO ]</h3>
-            <p><b>RAM:</b> 64MB Hard Limit</p>
-            <p><b>Storage:</b> 1GB</p>
-            <p><b>Network:</b> 1x IPv6 Address</p>
-            <hr style="border: 0; border-bottom: 1px dashed #333;">
-            <p style="font-size: 1.2em; color: yellow;">Price: ${{ preco_usd }} USD <i>(~{{ preco_pol }} POL)</i></p>
-            <a href="/login" style="background: #00ff00; color: #000; padding: 5px 10px; text-decoration: none; font-weight: bold;">> AUTHENTICATE TO BUY</a>
+            <h3 style="margin-top: 0; color: cyan;">[ NODE: {{ n.nome }} ]</h3>
+            <p style="margin: 0;"><b>Hardware Base:</b> <span style="color: #aaa;">{{ n.descricao_hardware }} ({{ n.arquitetura }})</span></p>
+            <p style="margin: 0;"><b>CPU Limit:</b> <span style="color: #aaa;">{{ n.cpu_fraction }}</span></p>
+            <p style="margin: 0;"><b>RAM Limit:</b> <span style="color: #aaa;">{{ n.ram_mb }}MB (+ {{ n.swap_mb }}MB SWAP)</span></p>
+            <p style="margin: 0;"><b>Storage:</b> <span style="color: #aaa;">{{ n.disk_mb }}MB</span></p>
+            <p style="margin: 0;"><b>Network:</b> <span style="color: #aaa;">IPv6 Global (Native) + IPv4 NAT</span></p>
+            <hr style="border: 0; border-bottom: 1px dashed #333; margin: 10px 0;">
+            <p style="font-size: 1.2em; color: yellow; margin-top: 0;">Price: ${{ n.preco_usd }} USD <i>(~{{ n.preco_pol }} POL)</i> / Month</p>
         </div>
+        {% endfor %}
+        
+        <br>
+        <a href="/login" style="background: #00ff00; color: #000; padding: 10px 15px; text-decoration: none; font-weight: bold; display: inline-block;">> AUTHENTICATE TO DEPLOY</a>
     </div>
 </body>
 </html>

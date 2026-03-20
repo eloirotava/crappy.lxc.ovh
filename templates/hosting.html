@@ -23,11 +23,15 @@
         </nav>
 
         <h2>> cat /proc/cpuinfo && free -m</h2>
-        <p>Our "Data Center" is literally a single SBC (Single Board Computer) running bare-metal LXC.</p>
+        <p>Our future vision is to provide "Bare-Metal" hosting by renting out entire boards so you can focus on your own crazy home projects (Homemade Colocation).</p>
         
+        <p style="color: yellow; font-weight: bold;">[!] STATUS: THIS MODALITY IS NOT YET AVAILABLE.</p>
+        <p>Currently, we only operate with the fractions (LXC) detailed in the <a href="/vps" style="color: cyan;">/vps</a> tab.</p>
+
+        <h3>> Current specs of our "Data Center":</h3>
         <ul>
-            <li><span>Node Hardware:</span> Banana Pi M1</li>
-            <li><span>CPU Architecture:</span> ARM Cortex-A7 (armhf)</li>
+            <li><span>Node Hardware:</span> Banana Pi M1, Recycled TV Boxes, etc.</li>
+            <li><span>CPU Architecture:</span> ARM Cortex-A7 (armhf), ARM64</li>
             <li><span>Network:</span> IPv6 Only (Drop-bridge isolation), NAT IPv4</li>
             <li><span>Container Type:</span> Unprivileged LXC (Debian/Alpine)</li>
             <li><span>Uptime Guarantee:</span> Absolutely None.</li>

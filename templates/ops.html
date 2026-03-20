@@ -6,7 +6,7 @@
         body { background: #050505; color: #00ff00; font-family: 'Courier New', monospace; padding: 20px; font-size: 13px; }
         .header { border-bottom: 2px solid #00ff00; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; }
         table { width: 100%; border-collapse: collapse; margin-bottom: 30px; }
-        th, td { border: 1px solid #333; padding: 8px; text-align: left; }
+        th, td { border: 1px solid #333; padding: 8px; text-align: left; vertical-align: top; }
         th { background: #111; color: yellow; }
         .btn { padding: 4px 8px; border: 1px solid #00ff00; background: none; color: #00ff00; cursor: pointer; text-decoration: none; font-size: 11px; }
         .btn:hover { background: #00ff00; color: black; }
@@ -18,9 +18,13 @@
         .form-row { display: flex; gap: 10px; margin-bottom: 10px; }
         .form-box input, .form-box select { background: #000; color: #00ff00; border: 1px solid #333; padding: 8px; width: 100%; box-sizing: border-box; }
         
-        details.edit-node summary { display: inline-block; outline: none; }
+        details.edit-node summary { display: inline-block; outline: none; margin-bottom: 5px; }
         details.edit-node[open] summary { border-bottom: 1px dashed cyan; margin-bottom: 10px; }
-        .edit-form-box { border: 1px dashed cyan; padding: 15px; background: #0a0a0a; margin-top: 10px;}
+        .edit-form-box { border: 1px dashed cyan; padding: 15px; background: #0a0a0a; margin-top: 10px; min-width: 500px;}
+        .edit-form-box input, .edit-form-box select { background: #000; color: #00ff00; border: 1px solid #333; padding: 8px; width: 100%; box-sizing: border-box; }
+        
+        .ticket-ops { border: 1px solid cyan; padding: 10px; margin-bottom: 10px; background: #0a0a0a;}
+        textarea { width: 100%; background: #000; color: #0f0; border: 1px solid #333; padding: 5px; box-sizing: border-box; }
     </style>
 </head>
 <body>
@@ -30,6 +34,27 @@
     </div>
 
     {% if msg %}<div class="msg">> {{ msg }}</div>{% endif %}
+
+    <h2>[ USER TICKETS ]</h2>
+    {% for t in tickets %}
+    <div class="ticket-ops" style="border-color: {% if t[4] == 'OPEN' %}yellow{% else %}#333{% endif %};">
+        <div style="display: flex; justify-content: space-between;">
+            <b>ID: {{ t[0] }} | USER: <span style="color: cyan;">{{ t[1] }}</span> | STATUS: {{ t[4] }}</b>
+            <span>{{ t[5] }}</span>
+        </div>
+        <p style="color: yellow; margin: 5px 0;">Subject: {{ t[2] }}</p>
+        <p style="color: #ccc; margin: 0 0 10px 0; white-space: pre-wrap;">{{ t[3] }}</p>
+        
+        {% if t[4] == 'OPEN' %}
+        <form action="/ops/ticket_reply/{{ t[0] }}" method="POST">
+            <textarea name="resposta" rows="2" placeholder="Sua resposta..." required></textarea>
+            <button class="btn" style="margin-top: 5px;" type="submit">REPLY & CLOSE TICKET</button>
+        </form>
+        {% else %}
+            <p style="color: cyan;"><b>REPLY:</b> {{ t[6] }}</p>
+        {% endif %}
+    </div>
+    {% endfor %}
 
     <h2>[ ADD NEW SERVER NODE ]</h2>
     <div class="form-box">
@@ -59,6 +84,7 @@
             <div class="form-row">
                 <input type="text" name="descricao_hardware" placeholder="Info Hardware (ex: Allwinner A20 DDR2)" required>
                 <input type="text" name="cpu_core" placeholder="CPU Core (ex: 0, 1, ou 0-3)" required>
+                <input type="number" name="ordem" placeholder="Ordem (0=primeiro)" required value="0">
             </div>
             <button type="submit" class="btn">> ADD NODE TO CLUSTER</button>
         </form>
@@ -67,7 +93,7 @@
     <h2>[ ACTIVE INFRASTRUCTURE NODES ]</h2>
     <table>
         <tr>
-            <th>ID</th>
+            <th>ORD / ID</th>
             <th>NAME & HW</th>
             <th>ARCH</th>
             <th>SPECS & CORE</th>
@@ -78,14 +104,20 @@
         </tr>
         {% for n in nodes %}
         <tr>
-            <td>{{ n[0] }}</td>
+            <td>[{{ n[16] }}] / {{ n[0] }}</td>
             <td>{{ n[1] }}<br><span style="color: #666; font-size: 0.9em;">{{ n[14] }}</span><br><span style="color: #555; font-size: 0.8em;">{{ n[2] }}</span></td>
             <td style="color: cyan;">{{ n[3] }}</td>
             <td style="color: #ccc;">{{ n[9] }} (Core {{ n[15] }})<br>{{ n[6] }}MB RAM / {{ n[7] }}MB SWAP / {{ n[8] }}MB DISK</td>
-            <td style="font-weight: bold; {% if n[16] >= n[10] %}color: red;{% endif %}">{{ n[16] }} / {{ n[10] }}</td>
+            <td style="font-weight: bold; {% if n[17] >= n[10] %}color: red;{% endif %}">{{ n[17] }} / {{ n[10] }}</td>
             <td style="color: yellow;">${{ n[4] }} / ${{ n[11] }} / ${{ n[12] }}</td>
             <td>{% if n[5] == 1 %}[ ONLINE ]{% else %}[ OFFLINE ]{% endif %}</td>
             <td>
+                <div style="display: flex; gap: 5px; margin-bottom: 10px;">
+                    <form action="/ops/delete_node/{{ n[0] }}" method="post" style="margin:0;">
+                        <button type="submit" class="btn btn-nuke" onclick="return confirm('Deseja mesmo DELETAR este node? Certifique-se de que não existem VPS rodando nele.')">[ DEL ]</button>
+                    </form>
+                </div>
+
                 <details class="edit-node">
                     <summary class="btn btn-edit">[ EDIT ]</summary>
                     <div class="edit-form-box">
@@ -115,6 +147,7 @@
                             <div class="form-row">
                                 <input type="text" name="descricao_hardware" value="{{ n[14] }}" placeholder="Hardware" required>
                                 <input type="text" name="cpu_core" value="{{ n[15] }}" placeholder="Core" required>
+                                <input type="number" name="ordem" value="{{ n[16] }}" placeholder="Ordem" required>
                             </div>
                             <button type="submit" class="btn" style="border-color: cyan; color: cyan;">> SAVE CHANGES</button>
                         </form>
@@ -164,15 +197,5 @@
     </table>
 
     <p><a href="/dash" class="btn"><< BACK TO DASH</a></p>
-
-    <script>
-        setTimeout(function reloadIfIdle() {
-            if (!document.querySelector('input:focus') && !document.querySelector('select:focus')) {
-                window.location.reload();
-            } else {
-                setTimeout(reloadIfIdle, 10000);
-            }
-        }, 60000);
-    </script>
 </body>
 </html>

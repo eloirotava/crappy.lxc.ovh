@@ -32,18 +32,39 @@
         <div class="alert">> STATUS: {{ msg }}</div>
         {% endif %}
 
-        <form method="POST" action="/registar">
-            <input type="email" name="email" placeholder="E-mail" required>
-            <input type="password" name="pw" placeholder="Password" required>
-            
-            <div class="checkbox-container">
-                <input type="checkbox" id="tos" name="tos" required>
-                <label for="tos">I accept the <a href="/tos" target="_blank" style="color: cyan;">Terms of Service</a>. I understand that abuse results in instant termination.</label>
-            </div>
+        {% if mode == 'forgot' %}
+            <p>> Enter your email to request a password override protocol.</p>
+            <form method="POST" action="/forgot">
+                <input type="email" name="email" placeholder="E-mail" required>
+                <button type="submit">REQUEST OVERRIDE LINK</button>
+            </form>
+            <br>
+            <p><a href="/login" style="color: cyan;">[ Return to Login ]</a></p>
 
-            <button type="submit" formaction="/login">LOGIN</button>
-            <button type="submit" formaction="/registar">REGISTER</button>
-        </form>
+        {% elif mode == 'reset' %}
+            <p>> SECURITY OVERRIDE ACCEPTED. Set new memory parameters.</p>
+            <form method="POST" action="/reset/{{ token }}">
+                <input type="password" name="pw" placeholder="New Password" required>
+                <button type="submit">SET NEW PASSWORD</button>
+            </form>
+
+        {% else %}
+            <form method="POST" action="/registar">
+                <input type="email" name="email" placeholder="E-mail" required>
+                <input type="password" name="pw" placeholder="Password" required>
+                
+                <div class="checkbox-container">
+                    <input type="checkbox" id="tos" name="tos" required>
+                    <label for="tos">I accept the <a href="/tos" target="_blank" style="color: cyan;">Terms of Service</a>. I understand that abuse results in instant termination.</label>
+                </div>
+
+                <button type="submit" formaction="/login">LOGIN</button>
+                <button type="submit" formaction="/registar">REGISTER</button>
+            </form>
+            <p style="text-align: right; margin-top: 10px;">
+                <a href="/forgot" style="color: yellow; font-size: 0.8em; text-decoration: none;">[ Forgot Password? ]</a>
+            </p>
+        {% endif %}
     </div>
 </body>
 </html>

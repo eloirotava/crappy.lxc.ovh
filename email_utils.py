@@ -11,23 +11,19 @@ SMTP_PORT = int(os.getenv("SMTP_PORT", 587))
 SMTP_USER = os.getenv("SMTP_USER")
 SMTP_PASS = os.getenv("SMTP_PASS")
 
-# 🚨 A MÁGICA AQUI: Pega o SENDER_EMAIL do .env
 SENDER_EMAIL = os.getenv("SENDER_EMAIL", SMTP_USER)
 
 def enviar_email_base(destinatario, assunto, corpo_html):
-    """Função base que conecta no SMTP do Brevo e envia o e-mail"""
     if not SMTP_USER or not SMTP_PASS:
         print(f"[⚠️] E-mail não enviado para {destinatario}: Credenciais SMTP ausentes no .env")
         return
 
     msg = MIMEMultipart()
     
-    # 🚨 AGORA USA O SENDER CORRETO!
     msg['From'] = f"Crappy LXC <{SENDER_EMAIL}>"
     msg['To'] = destinatario
     msg['Subject'] = assunto
 
-    # Template visual Hacker/Terminal
     template_hacker = f"""
     <html>
     <body style="background-color: #0a0a0a; color: #00ff00; font-family: 'Courier New', Courier, monospace; padding: 20px;">
@@ -46,15 +42,14 @@ def enviar_email_base(destinatario, assunto, corpo_html):
     msg.attach(MIMEText(template_hacker, 'html'))
 
     try:
-        # Conexão segura via TLS
         server = smtplib.SMTP(SMTP_SERVER, SMTP_PORT, timeout=10)
         server.starttls()
         server.login(SMTP_USER, SMTP_PASS)
         server.send_message(msg)
         server.quit()
-        print(f"[📧] BREVO: E-mail '{assunto}' enviado com sucesso para {destinatario}!")
+        print(f"[📧] E-mail '{assunto}' enviado com sucesso para {destinatario}!")
     except Exception as e:
-        print(f"[❌] Erro ao enviar e-mail via Brevo: {e}")
+        print(f"[❌] Erro ao enviar e-mail: {e}")
 
 # --- Funções Específicas ---
 
@@ -64,6 +59,16 @@ def enviar_email_confirmacao(destinatario, link_confirmacao):
     <p>Authentication request detected for this node.</p>
     <p>To authorize, run the following command (click the link):</p>
     <p><a href="{link_confirmacao}" style="color: yellow; text-decoration: none; border: 1px solid yellow; padding: 10px; display: inline-block;">./authorize_user.sh</a></p>
+    """
+    enviar_email_base(destinatario, assunto, html)
+
+def enviar_email_recuperacao(destinatario, link_recuperacao):
+    assunto = "[CRITICAL] Password Override Request"
+    html = f"""
+    <p style="color: red;">> ALERT: Password memory dump requested.</p>
+    <p>If you requested this override, click the link below to set a new root password:</p>
+    <p><a href="{link_recuperacao}" style="color: cyan; text-decoration: none; border: 1px solid cyan; padding: 10px; display: inline-block;">./force_reset_pw.sh</a></p>
+    <p>If you didn't request this, ignore this output.</p>
     """
     enviar_email_base(destinatario, assunto, html)
 

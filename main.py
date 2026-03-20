@@ -12,7 +12,7 @@ import httpx
 from dotenv import load_dotenv
 
 from crypto_utils import gerar_carteira, verificar_pagamento_pol, calcular_pol_necessario, varrer_carteira, w3
-from email_utils import enviar_email_confirmacao, enviar_email_pagamento, enviar_email_deploy
+from email_utils import enviar_email_confirmacao, enviar_email_pagamento, enviar_email_deploy, enviar_email_recuperacao
 from lxc_client import chamar_agent_banana_pi, controlar_vps
 from log_manager import registrar_log
 
@@ -48,9 +48,18 @@ def init_db():
         id INTEGER PRIMARY KEY AUTOINCREMENT, 
         nome TEXT, url_agente TEXT, token_agente TEXT, 
         arquitetura TEXT, preco_usd REAL, limite_vps INTEGER, ativo INTEGER DEFAULT 1)''')
+        
+    conn.execute('''CREATE TABLE IF NOT EXISTS tickets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT, assunto TEXT, mensagem TEXT, resposta TEXT,
+        status TEXT DEFAULT 'OPEN', data_criacao DATETIME DEFAULT CURRENT_TIMESTAMP)''')
     
     cursor = conn.cursor()
     
+    cursor.execute("PRAGMA table_info(users)")
+    colunas_users = [col[1] for col in cursor.fetchall()]
+    if 'reset_token' not in colunas_users: conn.execute("ALTER TABLE users ADD COLUMN reset_token TEXT")
+
     cursor.execute("PRAGMA table_info(vps)")
     colunas_vps = [col[1] for col in cursor.fetchall()]
     if 'node_id' not in colunas_vps: conn.execute("ALTER TABLE vps ADD COLUMN node_id INTEGER DEFAULT 1")
@@ -72,15 +81,17 @@ def init_db():
     if 'descricao_hardware' not in colunas_nodes:
         conn.execute("ALTER TABLE nodes ADD COLUMN descricao_hardware TEXT DEFAULT 'SBC Genérico (Lixo Reciclado)'")
         conn.execute("ALTER TABLE nodes ADD COLUMN cpu_core TEXT DEFAULT '0'")
+    if 'ordem' not in colunas_nodes:
+        conn.execute("ALTER TABLE nodes ADD COLUMN ordem INTEGER DEFAULT 0")
     
     cursor.execute("SELECT COUNT(*) FROM nodes")
     if cursor.fetchone()[0] == 0:
         agent_url = os.getenv("AGENT_URL", "https://server-1.rotava.com")
         agent_token = os.getenv("API_TOKEN", "mudar123")
         conn.execute("""INSERT INTO nodes 
-            (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite_vps, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("BananaPi (Home)", agent_url, agent_token, "armhf", 0.10, 0.10, 1.00, 10, 64, 32, 1024, "20%", "Allwinner A20 DDR2", "0"))
+            (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite_vps, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core, ordem) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("BananaPi (Home)", agent_url, agent_token, "armhf", 0.10, 0.10, 1.00, 10, 64, 32, 1024, "20%", "Allwinner A20 DDR2", "0", 0))
     
     conn.commit()
     conn.close()
@@ -104,7 +115,19 @@ async def home(request: Request): return templates.TemplateResponse("index.html"
 async def hosting_page(request: Request): return templates.TemplateResponse("hosting.html", {"request": request})
 
 @app.get("/vps", response_class=HTMLResponse)
-async def vps_page(request: Request): return RedirectResponse(url="/login", status_code=303)
+async def vps_page(request: Request):
+    conn = sqlite3.connect("db.sqlite")
+    nodes_db = conn.execute("SELECT nome, arquitetura, preco_usd, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware FROM nodes WHERE ativo = 1 ORDER BY ordem ASC, id ASC").fetchall()
+    nodes = []
+    for n in nodes_db:
+        nodes.append({
+            "nome": n[0], "arquitetura": n[1], "preco_usd": n[2], 
+            "preco_pol": f"{calcular_pol_necessario(n[2]):.6f}", 
+            "ram_mb": n[3], "swap_mb": n[4], "disk_mb": n[5], 
+            "cpu_fraction": n[6], "descricao_hardware": n[7]
+        })
+    conn.close()
+    return templates.TemplateResponse("vps.html", {"request": request, "nodes": nodes})
 
 @app.get("/tos", response_class=HTMLResponse)
 async def tos_page(request: Request): return templates.TemplateResponse("tos.html", {"request": request})
@@ -112,7 +135,7 @@ async def tos_page(request: Request): return templates.TemplateResponse("tos.htm
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
     msg = request.query_params.get("msg", "")
-    return templates.TemplateResponse("login.html", {"request": request, "msg": msg})
+    return templates.TemplateResponse("login.html", {"request": request, "msg": msg, "mode": "login"})
 
 @app.post("/registar")
 async def registar(bg_tasks: BackgroundTasks, email: str = Form(...), pw: str = Form(...), tos: str = Form(None)):
@@ -120,7 +143,7 @@ async def registar(bg_tasks: BackgroundTasks, email: str = Form(...), pw: str = 
     token = str(uuid.uuid4())
     conn = sqlite3.connect("db.sqlite")
     try:
-        conn.execute("INSERT INTO users VALUES (?, ?, ?, ?)", (email, pw, False, token))
+        conn.execute("INSERT INTO users (email, pw, conf, token) VALUES (?, ?, ?, ?)", (email, pw, False, token))
         conn.commit()
         bg_tasks.add_task(enviar_email_confirmacao, email, f"{BASE_URL}/confirmar/{token}")
     except sqlite3.IntegrityError:
@@ -146,6 +169,41 @@ async def login(response: Response, email: str = Form(...), pw: str = Form(...))
     res = RedirectResponse(url="/dash", status_code=303)
     res.set_cookie(key="sessao", value=email)
     return res
+
+# --- RECUPERAÇÃO DE SENHA ---
+@app.get("/forgot", response_class=HTMLResponse)
+async def forgot_page(request: Request):
+    msg = request.query_params.get("msg", "")
+    return templates.TemplateResponse("login.html", {"request": request, "msg": msg, "mode": "forgot"})
+
+@app.post("/forgot")
+async def forgot_post(bg_tasks: BackgroundTasks, email: str = Form(...)):
+    token = str(uuid.uuid4())
+    conn = sqlite3.connect("db.sqlite")
+    user = conn.execute("SELECT email FROM users WHERE email=?", (email,)).fetchone()
+    if user:
+        conn.execute("UPDATE users SET reset_token = ? WHERE email = ?", (token, email))
+        conn.commit()
+        bg_tasks.add_task(enviar_email_recuperacao, email, f"{BASE_URL}/reset/{token}")
+    conn.close()
+    return RedirectResponse(url="/forgot?msg=If+email+exists,+recovery+sent.", status_code=303)
+
+@app.get("/reset/{token}", response_class=HTMLResponse)
+async def reset_page(request: Request, token: str):
+    return templates.TemplateResponse("login.html", {"request": request, "token": token, "mode": "reset"})
+
+@app.post("/reset/{token}")
+async def reset_post(token: str, pw: str = Form(...)):
+    conn = sqlite3.connect("db.sqlite")
+    user = conn.execute("SELECT email FROM users WHERE reset_token=?", (token,)).fetchone()
+    if user:
+        conn.execute("UPDATE users SET pw = ?, reset_token = NULL WHERE reset_token = ?", (pw, token))
+        conn.commit()
+        conn.close()
+        return RedirectResponse(url="/login?msg=Password+Updated!+Please+Login.", status_code=303)
+    conn.close()
+    return RedirectResponse(url="/login?msg=Invalid+or+Expired+Token", status_code=303)
+# -----------------------------
 
 @app.get("/dash", response_class=HTMLResponse)
 async def dash(request: Request):
@@ -173,7 +231,7 @@ async def dash(request: Request):
             "node_nome": p[7], "arquitetura": p[8]
         })
     
-    nodes_db = conn.execute("SELECT id, nome, arquitetura, preco_usd, ram_mb, swap_mb, disk_mb, cpu_fraction, limite_vps, descricao_hardware, cpu_core FROM nodes WHERE ativo = 1").fetchall()
+    nodes_db = conn.execute("SELECT id, nome, arquitetura, preco_usd, ram_mb, swap_mb, disk_mb, cpu_fraction, limite_vps, descricao_hardware, cpu_core FROM nodes WHERE ativo = 1 ORDER BY ordem ASC, id ASC").fetchall()
     nodes_disponiveis = []
     for n in nodes_db:
         uso = conn.execute("SELECT COUNT(*) FROM vps WHERE node_id=? AND status NOT IN ('DELETED', 'TERMINATED')", (n[0],)).fetchone()[0]
@@ -183,8 +241,12 @@ async def dash(request: Request):
             "ram_mb": n[4], "swap_mb": n[5], "disk_mb": n[6], "cpu_fraction": n[7], "uso": uso, "limite": n[8], "sold_out": uso >= n[8],
             "descricao_hardware": n[9], "cpu_core": n[10]
         })
+        
+    tickets_db = conn.execute("SELECT id, assunto, mensagem, resposta, status, data_criacao FROM tickets WHERE email=? ORDER BY id DESC", (email,)).fetchall()
+    tickets = [{"id": t[0], "assunto": t[1], "mensagem": t[2], "resposta": t[3], "status": t[4], "data": t[5]} for t in tickets_db]
+        
     conn.close()
-    return templates.TemplateResponse("dash.html", {"request": request, "pedidos": pedidos, "nodes": nodes_disponiveis})
+    return templates.TemplateResponse("dash.html", {"request": request, "pedidos": pedidos, "nodes": nodes_disponiveis, "tickets": tickets})
 
 @app.post("/comprar")
 async def comprar(request: Request, bg_tasks: BackgroundTasks, node_id: int = Form(...)):
@@ -348,6 +410,26 @@ async def web_console(id_vps: str, request: Request):
     agent_url, agent_token, _, _, _, _, _ = get_node_info(id_vps)
     return templates.TemplateResponse("console.html", {"request": request, "vps_id": id_vps, "agent_url": agent_url, "token": agent_token})
 
+# --- TICKETS ---
+@app.post("/ticket")
+async def novo_ticket(request: Request, assunto: str = Form(...), mensagem: str = Form(...)):
+    email = request.cookies.get("sessao")
+    if not email: return RedirectResponse("/login")
+    conn = sqlite3.connect("db.sqlite")
+    conn.execute("INSERT INTO tickets (email, assunto, mensagem) VALUES (?, ?, ?)", (email, assunto, mensagem))
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url="/dash?msg=Ticket+Created", status_code=303)
+
+@app.post("/ops/ticket_reply/{ticket_id}")
+async def responder_ticket(ticket_id: int, resposta: str = Form(...), admin: str = Depends(verificar_admin)):
+    conn = sqlite3.connect("db.sqlite")
+    conn.execute("UPDATE tickets SET resposta = ?, status = 'CLOSED' WHERE id = ?", (resposta, ticket_id))
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url="/ops?msg=Ticket+Replied", status_code=303)
+# ---------------
+
 @app.get("/ops", response_class=HTMLResponse)
 async def painel_ops(request: Request, admin: str = Depends(verificar_admin)):
     msg = request.query_params.get("msg", "")
@@ -359,12 +441,14 @@ async def painel_ops(request: Request, admin: str = Depends(verificar_admin)):
         FROM vps v JOIN nodes n ON v.node_id = n.id
     """).fetchall()
     
-    nodes_db = conn.execute("SELECT id, nome, url_agente, arquitetura, preco_usd, ativo, ram_mb, swap_mb, disk_mb, cpu_fraction, limite_vps, preco_renew_usd, preco_ano_usd, token_agente, descricao_hardware, cpu_core FROM nodes").fetchall()
+    nodes_db = conn.execute("SELECT id, nome, url_agente, arquitetura, preco_usd, ativo, ram_mb, swap_mb, disk_mb, cpu_fraction, limite_vps, preco_renew_usd, preco_ano_usd, token_agente, descricao_hardware, cpu_core, ordem FROM nodes ORDER BY ordem ASC, id ASC").fetchall()
     
     nodes = []
     for n in nodes_db:
         uso = conn.execute("SELECT COUNT(*) FROM vps WHERE node_id=? AND status NOT IN ('DELETED', 'TERMINATED')", (n[0],)).fetchone()[0]
         nodes.append(n + (uso,))
+        
+    tickets_db = conn.execute("SELECT id, email, assunto, mensagem, status, data_criacao, resposta FROM tickets ORDER BY CASE WHEN status='OPEN' THEN 1 ELSE 2 END, id DESC").fetchall()
         
     conn_log = sqlite3.connect("logs.sqlite")
     logs = conn_log.execute("SELECT timestamp, nivel, evento, detalhes, email FROM system_logs ORDER BY id DESC LIMIT 30").fetchall()
@@ -374,7 +458,7 @@ async def painel_ops(request: Request, admin: str = Depends(verificar_admin)):
     except: gas = "OFFLINE"
 
     return templates.TemplateResponse("ops.html", {
-        "request": request, "usuarios": usuarios, "vps": vps_geral, "logs": logs, "nodes": nodes, "gas": gas, "msg": msg
+        "request": request, "usuarios": usuarios, "vps": vps_geral, "logs": logs, "nodes": nodes, "gas": gas, "tickets": tickets_db, "msg": msg
     })
 
 @app.post("/ops/add_node")
@@ -382,14 +466,14 @@ async def ops_add_node(
     request: Request, nome: str = Form(...), url_agente: str = Form(...), token_agente: str = Form(...), 
     arquitetura: str = Form(...), preco_usd: float = Form(...), preco_renew_usd: float = Form(...), preco_ano_usd: float = Form(...), limite: int = Form(...),
     ram_mb: int = Form(...), swap_mb: int = Form(...), disk_mb: int = Form(...), cpu_fraction: str = Form(...),
-    descricao_hardware: str = Form(...), cpu_core: str = Form(...),
+    descricao_hardware: str = Form(...), cpu_core: str = Form(...), ordem: int = Form(0),
     admin: str = Depends(verificar_admin)
 ):
     conn = sqlite3.connect("db.sqlite")
     conn.execute("""
-        INSERT INTO nodes (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite_vps, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core))
+        INSERT INTO nodes (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite_vps, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core, ordem) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core, ordem))
     conn.commit()
     conn.close()
     return RedirectResponse(url="/ops?msg=Node+Adicionado+com+Sucesso", status_code=303)
@@ -399,19 +483,27 @@ async def ops_edit_node(
     node_id: int, request: Request, nome: str = Form(...), url_agente: str = Form(...), token_agente: str = Form(...), 
     arquitetura: str = Form(...), preco_usd: float = Form(...), preco_renew_usd: float = Form(...), preco_ano_usd: float = Form(...), limite: int = Form(...),
     ram_mb: int = Form(...), swap_mb: int = Form(...), disk_mb: int = Form(...), cpu_fraction: str = Form(...),
-    descricao_hardware: str = Form(...), cpu_core: str = Form(...),
+    descricao_hardware: str = Form(...), cpu_core: str = Form(...), ordem: int = Form(0),
     admin: str = Depends(verificar_admin)
 ):
     conn = sqlite3.connect("db.sqlite")
     conn.execute("""
         UPDATE nodes SET 
             nome=?, url_agente=?, token_agente=?, arquitetura=?, preco_usd=?, preco_renew_usd=?, preco_ano_usd=?, 
-            limite_vps=?, ram_mb=?, swap_mb=?, disk_mb=?, cpu_fraction=?, descricao_hardware=?, cpu_core=?
+            limite_vps=?, ram_mb=?, swap_mb=?, disk_mb=?, cpu_fraction=?, descricao_hardware=?, cpu_core=?, ordem=?
         WHERE id=?
-    """, (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core, node_id))
+    """, (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core, ordem, node_id))
     conn.commit()
     conn.close()
     return RedirectResponse(url="/ops?msg=Node+Atualizado+com+Sucesso", status_code=303)
+
+@app.post("/ops/delete_node/{node_id}")
+async def ops_delete_node(node_id: int, admin: str = Depends(verificar_admin)):
+    conn = sqlite3.connect("db.sqlite")
+    conn.execute("DELETE FROM nodes WHERE id=?", (node_id,))
+    conn.commit()
+    conn.close()
+    return RedirectResponse(url="/ops?msg=Node+DELETED", status_code=303)
 
 @app.post("/ops/force_activate/{id_vps}")
 async def force_activate(id_vps: str, bg_tasks: BackgroundTasks, admin: str = Depends(verificar_admin)):
