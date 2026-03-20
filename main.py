@@ -441,3 +441,7 @@ async def nuke_vps(id_vps: str, admin: str = Depends(verificar_admin)):
     conn.commit()
     conn.close()
     return RedirectResponse(url="/ops?msg=Nuked", status_code=303)
+
+    if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
