@@ -9,6 +9,7 @@ import os
 import asyncio
 import secrets
 import httpx
+import ipaddress
 from dotenv import load_dotenv
 
 from crypto_utils import gerar_carteira, verificar_pagamento_pol, calcular_pol_necessario, varrer_carteira, w3
@@ -66,6 +67,9 @@ def init_db():
     if 'validade' not in colunas_vps:
         conn.execute("ALTER TABLE vps ADD COLUMN validade TEXT")
         conn.execute("UPDATE vps SET validade = datetime('now', '+30 days') WHERE status = 'ATIVA'")
+    if 'ipv4' not in colunas_vps:
+        conn.execute("ALTER TABLE vps ADD COLUMN ipv4 TEXT")
+        conn.execute("ALTER TABLE vps ADD COLUMN ipv6 TEXT")
         
     cursor.execute("PRAGMA table_info(nodes)")
     colunas_nodes = [col[1] for col in cursor.fetchall()]
@@ -79,19 +83,30 @@ def init_db():
         conn.execute("ALTER TABLE nodes ADD COLUMN preco_ano_usd REAL DEFAULT 1.00")
         conn.execute("UPDATE nodes SET preco_renew_usd = preco_usd, preco_ano_usd = preco_usd * 10")
     if 'descricao_hardware' not in colunas_nodes:
-        conn.execute("ALTER TABLE nodes ADD COLUMN descricao_hardware TEXT DEFAULT 'SBC Genérico (Lixo Reciclado)'")
+        conn.execute("ALTER TABLE nodes ADD COLUMN descricao_hardware TEXT DEFAULT 'SBC Genérico'")
         conn.execute("ALTER TABLE nodes ADD COLUMN cpu_core TEXT DEFAULT '0'")
     if 'ordem' not in colunas_nodes:
         conn.execute("ALTER TABLE nodes ADD COLUMN ordem INTEGER DEFAULT 0")
+        
+    # COLUNAS DE REDE E SCRIPT NO NODE
+    if 'ipv4_base' not in colunas_nodes:
+        conn.execute("ALTER TABLE nodes ADD COLUMN ipv4_base TEXT DEFAULT '10.0.0.'")
+        conn.execute("ALTER TABLE nodes ADD COLUMN ipv4_cidr TEXT DEFAULT '32'")
+        conn.execute("ALTER TABLE nodes ADD COLUMN ipv4_gw TEXT DEFAULT '10.0.0.1'")
+        conn.execute("ALTER TABLE nodes ADD COLUMN ipv6_base TEXT DEFAULT '2804:14d:7e89:41a0::'")
+        conn.execute("ALTER TABLE nodes ADD COLUMN ipv6_cidr TEXT DEFAULT '64'")
+        conn.execute("ALTER TABLE nodes ADD COLUMN ipv6_gw TEXT DEFAULT 'fe80::1'")
+    if 'deploy_script' not in colunas_nodes:
+        conn.execute("ALTER TABLE nodes ADD COLUMN deploy_script TEXT DEFAULT 'create_vps.sh'")
     
     cursor.execute("SELECT COUNT(*) FROM nodes")
     if cursor.fetchone()[0] == 0:
         agent_url = os.getenv("AGENT_URL", "https://server-1.rotava.com")
         agent_token = os.getenv("API_TOKEN", "mudar123")
         conn.execute("""INSERT INTO nodes 
-            (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite_vps, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core, ordem) 
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            ("BananaPi (Home)", agent_url, agent_token, "armhf", 0.10, 0.10, 1.00, 10, 64, 32, 1024, "20%", "Allwinner A20 DDR2", "0", 0))
+            (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite_vps, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core, ordem, ipv4_base, ipv4_cidr, ipv4_gw, ipv6_base, ipv6_cidr, ipv6_gw, deploy_script) 
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            ("BananaPi (Home)", agent_url, agent_token, "armhf", 0.10, 0.10, 1.00, 10, 64, 32, 1024, "20%", "Allwinner A20 DDR2", "0", 0, "10.0.0.", "32", "10.0.0.1", "2804:14d:7e89:41a0::", "64", "fe80::1", "create_vps.sh"))
     
     conn.commit()
     conn.close()
@@ -101,12 +116,65 @@ init_db()
 def get_node_info(id_vps):
     conn = sqlite3.connect("db.sqlite")
     res = conn.execute("""
-        SELECT n.url_agente, n.token_agente, n.ram_mb, n.swap_mb, n.disk_mb, n.cpu_fraction, n.cpu_core 
+        SELECT n.url_agente, n.token_agente, n.ram_mb, n.swap_mb, n.disk_mb, n.cpu_fraction, n.cpu_core, n.id, n.deploy_script
         FROM vps v JOIN nodes n ON v.node_id = n.id 
         WHERE v.id = ?
     """, (id_vps,)).fetchone()
     conn.close()
-    return res if res else (None, None, 64, 32, 1024, "20%", "0")
+    return res if res else (None, None, 64, 32, 1024, "20%", "0", 1, "create_vps.sh")
+
+def alocar_ips_disponiveis(node_id):
+    conn = sqlite3.connect("db.sqlite")
+    node = conn.execute("""
+        SELECT ipv4_base, ipv4_cidr, ipv6_base, ipv6_cidr, ipv4_gw, ipv6_gw, limite_vps 
+        FROM nodes WHERE id = ?
+    """, (node_id,)).fetchone()
+    
+    if not node:
+        conn.close()
+        return None
+        
+    ipv4_base, ipv4_cidr, ipv6_base, ipv6_cidr, ipv4_gw, ipv6_gw, limite = node
+    ips_em_uso = conn.execute("SELECT ipv4, ipv6 FROM vps WHERE node_id = ? AND status NOT IN ('DELETED', 'TERMINATED')", (node_id,)).fetchall()
+    conn.close()
+    
+    v4_usados = []
+    v6_usados = []
+    
+    for ip_v4, ip_v6 in ips_em_uso:
+        if ip_v4:
+            try:
+                ip_sem_cidr = ip_v4.split('/')[0]
+                v4_usados.append(int(ip_sem_cidr.split('.')[-1]))
+            except: pass
+        if ip_v6:
+            try:
+                ip_sem_cidr = ip_v6.split('/')[0]
+                v6_usados.append(int(ipaddress.IPv6Address(ip_sem_cidr)))
+            except: pass
+
+    # CAÇANDO O BURACO NO IPv4 (Iniciando no 2)
+    novo_v4_sufixo = None
+    for i in range(2, limite + 5):
+        if i not in v4_usados:
+            novo_v4_sufixo = i
+            break
+            
+    # CAÇANDO O BURACO NO IPv6
+    base_v6_int = int(ipaddress.IPv6Address(f"{ipv6_base}0"))
+    novo_v6_str = None
+    for i in range(2, limite + 5):
+        candidato_int = base_v6_int + i
+        if candidato_int not in v6_usados:
+            novo_v6_str = str(ipaddress.IPv6Address(candidato_int))
+            break
+
+    return {
+        "ipv4": f"{ipv4_base}{novo_v4_sufixo}/{ipv4_cidr}" if ipv4_base else "",
+        "ipv4_gw": ipv4_gw,
+        "ipv6": f"{novo_v6_str}/{ipv6_cidr}" if ipv6_base else "",
+        "ipv6_gw": ipv6_gw
+    }
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request): return templates.TemplateResponse("index.html", {"request": request})
@@ -170,7 +238,6 @@ async def login(response: Response, email: str = Form(...), pw: str = Form(...))
     res.set_cookie(key="sessao", value=email)
     return res
 
-# --- RECUPERAÇÃO DE SENHA ---
 @app.get("/forgot", response_class=HTMLResponse)
 async def forgot_page(request: Request):
     msg = request.query_params.get("msg", "")
@@ -203,7 +270,6 @@ async def reset_post(token: str, pw: str = Form(...)):
         return RedirectResponse(url="/login?msg=Password+Updated!+Please+Login.", status_code=303)
     conn.close()
     return RedirectResponse(url="/login?msg=Invalid+or+Expired+Token", status_code=303)
-# -----------------------------
 
 @app.get("/dash", response_class=HTMLResponse)
 async def dash(request: Request):
@@ -264,9 +330,8 @@ async def comprar(request: Request, bg_tasks: BackgroundTasks, node_id: int = Fo
         conn.close()
         return RedirectResponse(url="/dash?msg=OUT+OF+STOCK.+No+resources+available.", status_code=303)
     
-    id_pedido = "vps-" + str(uuid.uuid4())[:8]
+    id_pedido = "vps-" + str(uuid.uuid4())[:15]
     endereco, chave_privada = gerar_carteira()
-    
     p_pol = float(f"{calcular_pol_necessario(node[0]):.6f}")
     
     conn.execute("INSERT INTO vps (id, email, carteira, chave_privada, status, preco_pol, node_id) VALUES (?, ?, ?, ?, ?, ?, ?)", 
@@ -340,7 +405,7 @@ async def verificar_pagamento(id_vps: str, request: Request, bg_tasks: Backgroun
         if status == 'PENDING PAYMENT':
             bg_tasks.add_task(processar_ativacao_apos_pagamento, id_vps, email)
         elif status == 'SUSPENDED':
-            agent_url, agent_token, _, _, _, _, _ = get_node_info(id_vps)
+            agent_url, agent_token, _, _, _, _, _, _, _ = get_node_info(id_vps)
             bg_tasks.add_task(controlar_vps, id_vps, "start", agent_url, agent_token)
             
         return RedirectResponse(url=f"/dash?msg=PAYMENT+CONFIRMED!+Added+{dias_add}+days.", status_code=303)
@@ -349,21 +414,37 @@ async def verificar_pagamento(id_vps: str, request: Request, bg_tasks: Backgroun
         return RedirectResponse(url="/dash?msg=NO+FUNDS+FOUND.+Blockchain+may+take+a+minute.+Try+again.", status_code=303)
 
 async def processar_ativacao_apos_pagamento(id_vps, email):
-    agent_url, agent_token, ram, swap, disk, cpu, cpu_core = get_node_info(id_vps)
+    agent_url, agent_token, ram, swap, disk, cpu, cpu_core, node_id, deploy_script = get_node_info(id_vps)
     if not agent_url: return
-    resultado = await chamar_agent_banana_pi(id_vps, agent_url, agent_token, ram_mb=ram, swap_mb=swap, disk_mb=disk, cpu_fraction=cpu, cpu_core=cpu_core)
+    
+    rede = alocar_ips_disponiveis(node_id)
+    if not rede: return
+    
+    conn = sqlite3.connect("db.sqlite")
+    conn.execute("UPDATE vps SET ipv4 = ?, ipv6 = ? WHERE id = ?", (rede["ipv4"], rede["ipv6"], id_vps))
+    conn.commit()
+    conn.close()
+
+    resultado = await chamar_agent_banana_pi(
+        id_vps, agent_url, agent_token, 
+        ram_mb=ram, swap_mb=swap, disk_mb=disk, cpu_fraction=cpu, cpu_core=cpu_core,
+        ipv4=rede["ipv4"], ipv4_gw=rede["ipv4_gw"],
+        ipv6=rede["ipv6"], ipv6_gw=rede["ipv6_gw"],
+        deploy_script=deploy_script
+    )
+    
     if resultado.get("sucesso"):
-        registrar_log("DEPLOY_OK", f"IP: {resultado.get('ip')}", "SUCCESS", email)
-        enviar_email_deploy(email, id_vps, resultado.get("ip"), resultado.get("senha"))
+        registrar_log("DEPLOY_OK", f"IP: {rede['ipv6']}", "SUCCESS", email)
+        enviar_email_deploy(email, id_vps, rede["ipv6"], resultado.get("senha"))
 
 @app.post("/apagar_vps/{id_vps}")
 async def apagar_vps(id_vps: str, request: Request, bg_tasks: BackgroundTasks):
     email = request.cookies.get("sessao")
     if not email: return RedirectResponse("/login")
     
-    agent_url, agent_token, _, _, _, _, _ = get_node_info(id_vps)
+    agent_url, agent_token, _, _, _, _, _, _, _ = get_node_info(id_vps)
     conn = sqlite3.connect("db.sqlite")
-    conn.execute("UPDATE vps SET status = 'DELETED' WHERE id=? AND email=?", (id_vps, email))
+    conn.execute("UPDATE vps SET status = 'DELETED', ipv4 = NULL, ipv6 = NULL WHERE id=? AND email=?", (id_vps, email))
     conn.commit()
     conn.close()
     
@@ -380,7 +461,7 @@ async def painel_controle_vps(id_vps: str, acao: str, request: Request, bg_tasks
     conn.close()
     
     if vps and acao in ["start", "stop", "restart"]:
-        agent_url, agent_token, _, _, _, _, _ = get_node_info(id_vps)
+        agent_url, agent_token, _, _, _, _, _, _, _ = get_node_info(id_vps)
         if agent_url:
             bg_tasks.add_task(controlar_vps, id_vps, acao, agent_url, agent_token)
             registrar_log("LXC_POWER", f"Ordem {acao} enviada para {id_vps}", "INFO", email)
@@ -390,7 +471,7 @@ async def painel_controle_vps(id_vps: str, acao: str, request: Request, bg_tasks
 async def get_vps_status(id_vps: str, request: Request):
     email = request.cookies.get("sessao")
     if not email: return {"error": "unauthorized"}
-    agent_url, agent_token, _, _, _, _, _ = get_node_info(id_vps)
+    agent_url, agent_token, _, _, _, _, _, _, _ = get_node_info(id_vps)
     if not agent_url: return {"error": "not found"}
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
@@ -407,10 +488,9 @@ async def web_console(id_vps: str, request: Request):
     vps = conn.execute("SELECT id FROM vps WHERE id=? AND email=? AND status='ATIVA'", (id_vps, email)).fetchone()
     conn.close()
     if not vps: return RedirectResponse("/dash")
-    agent_url, agent_token, _, _, _, _, _ = get_node_info(id_vps)
+    agent_url, agent_token, _, _, _, _, _, _, _ = get_node_info(id_vps)
     return templates.TemplateResponse("console.html", {"request": request, "vps_id": id_vps, "agent_url": agent_url, "token": agent_token})
 
-# --- TICKETS ---
 @app.post("/ticket")
 async def novo_ticket(request: Request, assunto: str = Form(...), mensagem: str = Form(...)):
     email = request.cookies.get("sessao")
@@ -428,7 +508,6 @@ async def responder_ticket(ticket_id: int, resposta: str = Form(...), admin: str
     conn.commit()
     conn.close()
     return RedirectResponse(url="/ops?msg=Ticket+Replied", status_code=303)
-# ---------------
 
 @app.get("/ops", response_class=HTMLResponse)
 async def painel_ops(request: Request, admin: str = Depends(verificar_admin)):
@@ -441,7 +520,7 @@ async def painel_ops(request: Request, admin: str = Depends(verificar_admin)):
         FROM vps v JOIN nodes n ON v.node_id = n.id
     """).fetchall()
     
-    nodes_db = conn.execute("SELECT id, nome, url_agente, arquitetura, preco_usd, ativo, ram_mb, swap_mb, disk_mb, cpu_fraction, limite_vps, preco_renew_usd, preco_ano_usd, token_agente, descricao_hardware, cpu_core, ordem FROM nodes ORDER BY ordem ASC, id ASC").fetchall()
+    nodes_db = conn.execute("SELECT id, nome, url_agente, arquitetura, preco_usd, ativo, ram_mb, swap_mb, disk_mb, cpu_fraction, limite_vps, preco_renew_usd, preco_ano_usd, token_agente, descricao_hardware, cpu_core, ordem, ipv4_base, ipv4_cidr, ipv4_gw, ipv6_base, ipv6_cidr, ipv6_gw, deploy_script FROM nodes ORDER BY ordem ASC, id ASC").fetchall()
     
     nodes = []
     for n in nodes_db:
@@ -467,13 +546,16 @@ async def ops_add_node(
     arquitetura: str = Form(...), preco_usd: float = Form(...), preco_renew_usd: float = Form(...), preco_ano_usd: float = Form(...), limite: int = Form(...),
     ram_mb: int = Form(...), swap_mb: int = Form(...), disk_mb: int = Form(...), cpu_fraction: str = Form(...),
     descricao_hardware: str = Form(...), cpu_core: str = Form(...), ordem: int = Form(0),
+    ipv4_base: str = Form(...), ipv4_cidr: str = Form(...), ipv4_gw: str = Form(...),
+    ipv6_base: str = Form(...), ipv6_cidr: str = Form(...), ipv6_gw: str = Form(...),
+    deploy_script: str = Form("create_vps.sh"),
     admin: str = Depends(verificar_admin)
 ):
     conn = sqlite3.connect("db.sqlite")
     conn.execute("""
-        INSERT INTO nodes (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite_vps, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core, ordem) 
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core, ordem))
+        INSERT INTO nodes (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite_vps, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core, ordem, ipv4_base, ipv4_cidr, ipv4_gw, ipv6_base, ipv6_cidr, ipv6_gw, deploy_script) 
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core, ordem, ipv4_base, ipv4_cidr, ipv4_gw, ipv6_base, ipv6_cidr, ipv6_gw, deploy_script))
     conn.commit()
     conn.close()
     return RedirectResponse(url="/ops?msg=Node+Adicionado+com+Sucesso", status_code=303)
@@ -484,26 +566,22 @@ async def ops_edit_node(
     arquitetura: str = Form(...), preco_usd: float = Form(...), preco_renew_usd: float = Form(...), preco_ano_usd: float = Form(...), limite: int = Form(...),
     ram_mb: int = Form(...), swap_mb: int = Form(...), disk_mb: int = Form(...), cpu_fraction: str = Form(...),
     descricao_hardware: str = Form(...), cpu_core: str = Form(...), ordem: int = Form(0),
+    ipv4_base: str = Form(...), ipv4_cidr: str = Form(...), ipv4_gw: str = Form(...),
+    ipv6_base: str = Form(...), ipv6_cidr: str = Form(...), ipv6_gw: str = Form(...),
+    deploy_script: str = Form("create_vps.sh"),
     admin: str = Depends(verificar_admin)
 ):
     conn = sqlite3.connect("db.sqlite")
     conn.execute("""
         UPDATE nodes SET 
             nome=?, url_agente=?, token_agente=?, arquitetura=?, preco_usd=?, preco_renew_usd=?, preco_ano_usd=?, 
-            limite_vps=?, ram_mb=?, swap_mb=?, disk_mb=?, cpu_fraction=?, descricao_hardware=?, cpu_core=?, ordem=?
+            limite_vps=?, ram_mb=?, swap_mb=?, disk_mb=?, cpu_fraction=?, descricao_hardware=?, cpu_core=?, ordem=?,
+            ipv4_base=?, ipv4_cidr=?, ipv4_gw=?, ipv6_base=?, ipv6_cidr=?, ipv6_gw=?, deploy_script=?
         WHERE id=?
-    """, (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core, ordem, node_id))
+    """, (nome, url_agente, token_agente, arquitetura, preco_usd, preco_renew_usd, preco_ano_usd, limite, ram_mb, swap_mb, disk_mb, cpu_fraction, descricao_hardware, cpu_core, ordem, ipv4_base, ipv4_cidr, ipv4_gw, ipv6_base, ipv6_cidr, ipv6_gw, deploy_script, node_id))
     conn.commit()
     conn.close()
     return RedirectResponse(url="/ops?msg=Node+Atualizado+com+Sucesso", status_code=303)
-
-@app.post("/ops/delete_node/{node_id}")
-async def ops_delete_node(node_id: int, admin: str = Depends(verificar_admin)):
-    conn = sqlite3.connect("db.sqlite")
-    conn.execute("DELETE FROM nodes WHERE id=?", (node_id,))
-    conn.commit()
-    conn.close()
-    return RedirectResponse(url="/ops?msg=Node+DELETED", status_code=303)
 
 @app.post("/ops/force_activate/{id_vps}")
 async def force_activate(id_vps: str, bg_tasks: BackgroundTasks, admin: str = Depends(verificar_admin)):
@@ -517,19 +595,36 @@ async def force_activate(id_vps: str, bg_tasks: BackgroundTasks, admin: str = De
     return RedirectResponse(url="/ops?msg=Manual+Deploy+Started", status_code=303)
 
 async def processar_ativacao_manual(id_vps, email):
-    agent_url, agent_token, ram, swap, disk, cpu, cpu_core = get_node_info(id_vps)
-    res = await chamar_agent_banana_pi(id_vps, agent_url, agent_token, ram_mb=ram, swap_mb=swap, disk_mb=disk, cpu_fraction=cpu, cpu_core=cpu_core)
+    agent_url, agent_token, ram, swap, disk, cpu, cpu_core, node_id, deploy_script = get_node_info(id_vps)
+    if not agent_url: return
+    
+    rede = alocar_ips_disponiveis(node_id)
+    if not rede: return
+    
+    conn = sqlite3.connect("db.sqlite")
+    conn.execute("UPDATE vps SET ipv4 = ?, ipv6 = ? WHERE id = ?", (rede["ipv4"], rede["ipv6"], id_vps))
+    conn.commit()
+    conn.close()
+
+    res = await chamar_agent_banana_pi(
+        id_vps, agent_url, agent_token, 
+        ram_mb=ram, swap_mb=swap, disk_mb=disk, cpu_fraction=cpu, cpu_core=cpu_core,
+        ipv4=rede["ipv4"], ipv4_gw=rede["ipv4_gw"],
+        ipv6=rede["ipv6"], ipv6_gw=rede["ipv6_gw"],
+        deploy_script=deploy_script
+    )
+    
     if res.get("sucesso"):
         conn = sqlite3.connect("db.sqlite")
         conn.execute("UPDATE vps SET status = 'ATIVA' WHERE id = ?", (id_vps,))
         conn.commit()
         conn.close()
-        enviar_email_deploy(email, id_vps, res.get("ip"), res.get("senha"))
+        enviar_email_deploy(email, id_vps, rede["ipv6"], res.get("senha"))
 
 @app.post("/ops/nuke/{id_vps}")
 async def nuke_vps(id_vps: str, admin: str = Depends(verificar_admin)):
     conn = sqlite3.connect("db.sqlite")
-    conn.execute("UPDATE vps SET status = 'BANNED' WHERE id = ?", (id_vps,))
+    conn.execute("UPDATE vps SET status = 'BANNED', ipv4 = NULL, ipv6 = NULL WHERE id = ?", (id_vps,))
     conn.commit()
     conn.close()
     return RedirectResponse(url="/ops?msg=Nuked", status_code=303)

@@ -70,21 +70,32 @@
                     <option value="arm64">arm64 (TV Box S905 / RPi 64bit)</option>
                     <option value="amd64">amd64 (VPS Tradicional)</option>
                 </select>
-                <input type="number" step="0.001" name="preco_usd" placeholder="Deploy Price USD (ex: 0.025)" required>
-                <input type="number" step="0.001" name="preco_renew_usd" placeholder="Renew 30d USD (ex: 0.025)" required>
-                <input type="number" step="0.001" name="preco_ano_usd" placeholder="Renew 1Y USD (ex: 0.25)" required>
-                <input type="number" name="limite" placeholder="Max VPS Limit (ex: 50)" required>
+                <input type="number" step="0.001" name="preco_usd" placeholder="Deploy Price USD" required>
+                <input type="number" step="0.001" name="preco_renew_usd" placeholder="Renew 30d USD" required>
+                <input type="number" step="0.001" name="preco_ano_usd" placeholder="Renew 1Y USD" required>
+                <input type="number" name="limite" placeholder="Max VPS Limit" required>
             </div>
             <div class="form-row">
                 <input type="number" name="ram_mb" placeholder="RAM Limit (MB)" required>
                 <input type="number" name="swap_mb" placeholder="Swap Limit (MB)" required>
                 <input type="number" name="disk_mb" placeholder="Disk Limit (MB)" required>
-                <input type="text" name="cpu_fraction" placeholder="CPU Text (ex: 1% CPU)" required>
+                <input type="text" name="cpu_fraction" placeholder="CPU Text (ex: 20%)" required>
             </div>
             <div class="form-row">
-                <input type="text" name="descricao_hardware" placeholder="Info Hardware (ex: Allwinner A20 DDR2)" required>
-                <input type="text" name="cpu_core" placeholder="CPU Core (ex: 0, 1, ou 0-3)" required>
+                <input type="text" name="descricao_hardware" placeholder="Info Hardware" required>
+                <input type="text" name="cpu_core" placeholder="CPU Core (ex: 0, 1, 0-3)" required>
                 <input type="number" name="ordem" placeholder="Ordem (0=primeiro)" required value="0">
+                <input type="text" name="deploy_script" placeholder="Script de Deploy (.sh)" value="create_vps.sh" required>
+            </div>
+            <div class="form-row">
+                <input type="text" name="ipv4_base" placeholder="IPv4 Base (ex: 10.0.0.)" value="10.0.0." required>
+                <input type="text" name="ipv4_cidr" placeholder="IPv4 CIDR (ex: 32)" value="32" required>
+                <input type="text" name="ipv4_gw" placeholder="IPv4 Gateway (ex: 10.0.0.1)" value="10.0.0.1" required>
+            </div>
+            <div class="form-row">
+                <input type="text" name="ipv6_base" placeholder="IPv6 Base (ex: 2804:14d:7e89:41a0::)" required>
+                <input type="text" name="ipv6_cidr" placeholder="IPv6 CIDR (ex: 64)" value="64" required>
+                <input type="text" name="ipv6_gw" placeholder="IPv6 Gateway (ex: fe80::1)" value="fe80::1" required>
             </div>
             <button type="submit" class="btn">> ADD NODE TO CLUSTER</button>
         </form>
@@ -107,8 +118,8 @@
             <td>[{{ n[16] }}] / {{ n[0] }}</td>
             <td>{{ n[1] }}<br><span style="color: #666; font-size: 0.9em;">{{ n[14] }}</span><br><span style="color: #555; font-size: 0.8em;">{{ n[2] }}</span></td>
             <td style="color: cyan;">{{ n[3] }}</td>
-            <td style="color: #ccc;">{{ n[9] }} (Core {{ n[15] }})<br>{{ n[6] }}MB RAM / {{ n[7] }}MB SWAP / {{ n[8] }}MB DISK</td>
-            <td style="font-weight: bold; {% if n[17] >= n[10] %}color: red;{% endif %}">{{ n[17] }} / {{ n[10] }}</td>
+            <td style="color: #ccc;">{{ n[9] }} (Core {{ n[15] }})<br>{{ n[6] }}MB RAM / {{ n[7] }}MB SWAP / {{ n[8] }}MB DISK<br><span style="color: yellow; font-size: 0.8em;">[Script: {{ n[23] }}]</span></td>
+            <td style="font-weight: bold; {% if n[24] >= n[10] %}color: red;{% endif %}">{{ n[24] }} / {{ n[10] }}</td>
             <td style="color: yellow;">${{ n[4] }} / ${{ n[11] }} / ${{ n[12] }}</td>
             <td>{% if n[5] == 1 %}[ ONLINE ]{% else %}[ OFFLINE ]{% endif %}</td>
             <td>
@@ -148,6 +159,17 @@
                                 <input type="text" name="descricao_hardware" value="{{ n[14] }}" placeholder="Hardware" required>
                                 <input type="text" name="cpu_core" value="{{ n[15] }}" placeholder="Core" required>
                                 <input type="number" name="ordem" value="{{ n[16] }}" placeholder="Ordem" required>
+                                <input type="text" name="deploy_script" value="{{ n[23] }}" placeholder="Script de Deploy" required>
+                            </div>
+                            <div class="form-row">
+                                <input type="text" name="ipv4_base" value="{{ n[17] }}" placeholder="IPv4 Base" required>
+                                <input type="text" name="ipv4_cidr" value="{{ n[18] }}" placeholder="IPv4 CIDR" required>
+                                <input type="text" name="ipv4_gw" value="{{ n[19] }}" placeholder="IPv4 Gateway" required>
+                            </div>
+                            <div class="form-row">
+                                <input type="text" name="ipv6_base" value="{{ n[20] }}" placeholder="IPv6 Base" required>
+                                <input type="text" name="ipv6_cidr" value="{{ n[21] }}" placeholder="IPv6 CIDR" required>
+                                <input type="text" name="ipv6_gw" value="{{ n[22] }}" placeholder="IPv6 Gateway" required>
                             </div>
                             <button type="submit" class="btn" style="border-color: cyan; color: cyan;">> SAVE CHANGES</button>
                         </form>
@@ -161,7 +183,7 @@
     <h2>[ ACTIVE CONTAINERS ]</h2>
     <table>
         <tr>
-            <th>ID</th>
+            <th>ID / NET</th>
             <th>USER</th>
             <th>NODE</th>
             <th>VALIDITY</th>

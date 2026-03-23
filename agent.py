@@ -1,165 +1,98 @@
-from gevent import monkey
-monkey.patch_all()
-
-import os, pty, subprocess, select, time
 from flask import Flask, request, jsonify
-from flask_socketio import SocketIO
+import subprocess
+import os
 from dotenv import load_dotenv
+import secrets
+import string
 
 load_dotenv()
-SECRET_TOKEN = os.getenv("API_TOKEN", "mudar123")
 
 app = Flask(__name__)
-socketio = SocketIO(app, cors_allowed_origins="*", async_mode="gevent")
-
-VG_NAME = "vg_clientes"
-DEFAULT_ARCH = "armhf" 
-fd_dict = {}
+API_KEY = os.getenv("API_KEY", "mudar123")
 
 def check_auth():
-    return request.headers.get("X-API-Key") == SECRET_TOKEN
+    token = request.headers.get("X-API-Key")
+    return token == API_KEY
 
 def run_cmd(cmd):
-    print(f"\n[EXEC] {cmd}") 
     try:
-        result = subprocess.run(cmd, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        return True, result.stdout
+        resultado = subprocess.run(cmd, shell=True, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        return True, resultado.stdout
     except subprocess.CalledProcessError as e:
-        print(f"❌ [ERRO CRÍTICO no comando]: {cmd}")
-        print(f"❌ [STDERR]: {e.stderr.strip()}")
         return False, e.stderr
 
-def wait_for_network(vps_id, max_retries=20):
-    print(f"[{vps_id}] Aguardando rede...")
-    for i in range(max_retries):
-        success, ip_check = run_cmd(f"lxc-info -n {vps_id} -i")
-        if success and "IP:" in ip_check:
-            time.sleep(3)
-            return True
-        time.sleep(2)
-    return False
+def gerar_senha_segura(tamanho=12):
+    caracteres = string.ascii_letters + string.digits
+    return ''.join(secrets.choice(caracteres) for _ in range(tamanho))
 
 @app.route('/create', methods=['POST'])
 def create_vps():
     if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
-    data = request.json
-    vps_id, distro = data.get('vps_id'), data.get('distro', 'alpine')
     
+    data = request.json
+    vps_id = data.get('vps_id')
+    distro = data.get('distro', 'alpine')
     ram = data.get('ram_mb', 64)
-    swap = data.get('swap_mb', 64) 
-    disk = data.get('disk_mb', 256)
+    swap = data.get('swap_mb', 32)
+    disk = data.get('disk_mb', 1024)
     cpu_fraction = data.get('cpu_fraction', '20%')
     cpu_core = data.get('cpu_core', '0')
     
+    ipv4 = data.get('ipv4', '10.0.0.99/32')
+    ipv4_gw = data.get('ipv4_gw', '10.0.0.1')
+    ipv6 = data.get('ipv6', '2804:14d:7e89:41a0::99/64')
+    ipv6_gw = data.get('ipv6_gw', 'fe80::1')
+    
+    # 1. Pega o nome do script e HIGIENIZA (Evita Path Traversal)
+    script_cru = data.get('deploy_script', 'create_vps.sh')
+    script_seguro = os.path.basename(script_cru) # Remove barras e caminhos (ex: ../../script.sh vira script.sh)
+    
+    if not script_seguro.endswith('.sh'):
+        script_seguro += '.sh'
+        
+    if not os.path.exists(script_seguro):
+        print(f"❌ [ERRO] O script {script_seguro} não existe neste node!")
+        return jsonify({"error": f"Script {script_seguro} not found on node"}), 400
+
     try:
         cpu_percent = int(str(cpu_fraction).replace('%', '').strip())
         cpu_quota = int((cpu_percent / 100.0) * 100000)
     except:
         cpu_quota = 20000 
     
-    release = "edge" if distro == "alpine" else "bookworm"
-    senha = vps_id.split('vps-', 1)[1] if 'vps-' in vps_id else "mudar123"
+    senha = gerar_senha_segura()
 
-    print(f"\n🚀 [INICIANDO DEPLOY] {vps_id} | RAM: {ram}MB | SWAP: {swap}MB | DISK: {disk}MB | CORE: {cpu_core} | CPU: {cpu_quota}/100000")
+    print(f"\n🚀 [DEPLOY INICIADO] {vps_id} usando {script_seguro}")
 
-    sucesso, _ = run_cmd(f"lxc-create -n {vps_id} -t download -B lvm --vgname {VG_NAME} --fssize {disk}M -- -d {distro} -r {release} -a {DEFAULT_ARCH}")
+    # 2. Chama o script dinâmico de forma segura
+    cmd = f"./{script_seguro} '{vps_id}' '{distro}' '{ram}' '{swap}' '{disk}' '{cpu_quota}' '{cpu_core}' '{ipv4}' '{ipv4_gw}' '{ipv6}' '{ipv6_gw}' '{senha}'"
+    
+    sucesso, output = run_cmd(cmd)
+    
     if not sucesso:
-        return jsonify({"error": "LXC Create Failed"}), 500
+        print(f"❌ [ERRO DEPLOY] {output}")
+        return jsonify({"error": "Deploy script failed", "details": output}), 500
 
-    run_cmd(f"lxc-start -n {vps_id} -d")
-    if not wait_for_network(vps_id): 
-        return jsonify({"error": "Net Timeout"}), 500
-
-    bootstrap = f"apk update && apk add openssh procps coreutils dhcpcd && rc-update add sshd default && rc-update add dhcpcd default && sed -i 's/^#.*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && echo 'root:{senha}' | chpasswd"
-    if distro != "alpine":
-        bootstrap = f"apt update && apt install -y openssh-server iproute2 procps && systemctl enable ssh && sed -i 's/^#.*PermitRootLogin.*/PermitRootLogin yes/' /etc/ssh/sshd_config && echo 'root:{senha}' | chpasswd"
-    
-    run_cmd(f"lxc-attach -n {vps_id} -- sh -c \"{bootstrap}\"")
-    
-    # PARA O CONTÊINER ANTES DE APLICAR OS LIMITES
-    run_cmd(f"lxc-stop -n {vps_id}")
-
-    # Aplica os isolamentos do cgroups v2 no arquivo de configuração
-    with open(f"/var/lib/lxc/{vps_id}/config", "a") as f:
-        f.write(f"\nlxc.cgroup2.memory.max = {ram}M\n")
-        f.write(f"lxc.cgroup2.memory.swap.max = {swap}M\n")
-        f.write(f"lxc.cgroup2.cpu.max = {cpu_quota} 100000\n") 
-        f.write(f"lxc.cgroup2.cpuset.cpus = {cpu_core}\n") 
-    
-    # INICIA O CONTÊINER NOVAMENTE (agora ele vai ler o config com os novos limites)
-    run_cmd(f"lxc-start -n {vps_id} -d")
-
-    print(f"✅ [SUCESSO] VPS {vps_id} isolada e entregue com limites ativados!")
+    print(f"✅ [SUCESSO] {vps_id} finalizada pelo {script_seguro}!")
     return jsonify({"status": "success", "vps": vps_id, "pass": senha})
+
+@app.route('/control/<acao>', methods=['POST'])
+def control_vps(acao):
+    if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
+    vps_id = request.json.get('vps_id')
+    comandos = {"start": f"lxc-start -n {vps_id}", "stop": f"lxc-stop -n {vps_id}", "restart": f"lxc-stop -n {vps_id} && lxc-start -n {vps_id}", "delete": f"lxc-stop -n {vps_id} ; lxc-destroy -n {vps_id}"}
+    if acao not in comandos: return jsonify({"error": "Invalid action"}), 400
+    sucesso, output = run_cmd(comandos[acao])
+    return jsonify({"status": "success"}) if sucesso else (jsonify({"error": "Command failed", "details": output}), 500)
 
 @app.route('/status/<vps_id>', methods=['GET'])
 def status_vps(vps_id):
     if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
-    success, info = run_cmd(f"lxc-info -n {vps_id}")
-    if not success: return jsonify({"error": "Not Found"}), 404
-    _, ip_raw = run_cmd(f"lxc-info -n {vps_id} -i")
-    ipv4, ipv6 = [], []
-    for line in ip_raw.strip().split('\n'):
-        if "IP:" in line:
-            ip = line.split(":", 1)[1].strip()
-            if ":" in ip: ipv6.append(ip)
-            else: ipv4.append(ip)
-    return jsonify({"vps": vps_id, "online": "RUNNING" in info, "ipv4": ipv4, "ipv6": ipv6})
-
-@app.route('/control/<action>', methods=['POST'])
-def control_vps(action):
-    if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
-    vps_id = request.json.get('vps_id')
-    cmds = {
-        "start": f"lxc-start -n {vps_id} -d", 
-        "stop": f"lxc-stop -n {vps_id}", 
-        "restart": f"lxc-stop -n {vps_id} -r", 
-        "delete": f"lxc-stop -n {vps_id} -k && lxc-destroy -n {vps_id} -f"
-    }
-    run_cmd(cmds.get(action, "true"))
-    return jsonify({"status": "action_sent"})
-
-@socketio.on("connect_vps")
-def handle_connect_vps(data):
-    if data.get("token") != SECRET_TOKEN: return False
-    vps_id = data.get("vps_id")
-    master, slave = pty.openpty()
-    def setup_tty():
-        os.setsid()
-        os.login_tty(slave)
-    proc = subprocess.Popen(["lxc-attach", "-n", vps_id, "--", "/bin/sh", "-i"], preexec_fn=setup_tty, env={"TERM": "xterm", "HOME": "/root"})
-    os.close(slave)
-    fd_dict[request.sid] = master
-    os.write(master, b"\n") 
-    socketio.start_background_task(target=read_vps_loop, sid=request.sid, fd=master, proc=proc)
-
-def read_vps_loop(sid, fd, proc):
-    while sid in fd_dict:
-        socketio.sleep(0.01)
-        if proc.poll() is not None:
-            socketio.emit("vps_output", {"output": "\r\n[Conexao encerrada pelo shell]\r\n"}, room=sid)
-            break
-        r, _, _ = select.select([fd], [], [], 0.05)
-        if fd in r:
-            try:
-                data = os.read(fd, 4096)
-                if not data: break
-                socketio.emit("vps_output", {"output": data.decode(errors='replace')}, room=sid)
-            except: break
-    if sid in fd_dict:
-        os.close(fd_dict.pop(sid))
-        socketio.emit("vps_closed", room=sid)
-
-@socketio.on("vps_input")
-def handle_input(data):
-    if request.sid in fd_dict:
-        try: os.write(fd_dict[request.sid], data.get("input").encode())
-        except: pass
-
-@socketio.on("disconnect")
-def handle_disc():
-    if request.sid in fd_dict: os.close(fd_dict.pop(request.sid))
+    sucesso, output = run_cmd(f"lxc-info -n {vps_id}")
+    if sucesso:
+        state = "RUNNING" if "State:          RUNNING" in output else "STOPPED"
+        return jsonify({"vps_id": vps_id, "status": state, "raw": output})
+    return jsonify({"error": "Failed"}), 500
 
 if __name__ == '__main__':
-    print("🚀 Agente ON na 5000")
-    socketio.run(app, host='0.0.0.0', port=5000)
+    app.run(host='0.0.0.0', port=5000)
