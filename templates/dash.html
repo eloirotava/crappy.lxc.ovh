@@ -140,7 +140,7 @@
                         {% endif %}
                         
                         {% if p.status == 'ATIVA' %}
-                            <span class="status status-active">[ ONLINE ]</span>
+                            <span id="badge-{{ p.id }}" class="status status-pending">[ PINGING NODE... ]</span>
                         {% elif p.status == 'PENDING PAYMENT' %}
                             <span class="status status-pending">[ PENDING PAYMENT ]</span>
                         {% elif p.status == 'SUSPENDED' %}
@@ -265,12 +265,39 @@
             vpsAtivas.forEach(id => {
                 fetch(`/api/status/${id}`).then(r => r.json()).then(data => {
                     let divIp = document.getElementById(`ip-info-${id}`);
-                    if(data.ipv4 && data.ipv4.length > 0 || data.ipv6 && data.ipv6.length > 0) {
-                        let ipsV4 = (data.ipv4 || []).join(', ');
-                        let ipsV6 = (data.ipv6 || []).filter(ip => !ip.startsWith('fe80')).join(', ');
-                        divIp.innerHTML = `> <b>IPv4 NAT:</b> ${ipsV4 || 'N/A'}<br>> <b>IPv6 Public:</b> ${ipsV6 || 'N/A'}`;
-                    } else { divIp.innerHTML = "> Interface is down or waiting for DHCP/NDP..."; }
-                }).catch(err => console.log(err));
+                    let badge = document.getElementById(`badge-${id}`);
+                    
+                    if (badge) {
+                        if (data.status === "RUNNING") {
+                            badge.className = "status status-active";
+                            badge.innerText = "[ ONLINE ]";
+                        } else if (data.status === "STOPPED") {
+                            badge.className = "status status-suspended";
+                            badge.innerText = "[ OFFLINE ]";
+                            badge.style.background = "#ff5555";
+                        } else {
+                            badge.className = "status status-suspended";
+                            badge.innerText = "[ NODE ERROR ]";
+                        }
+                    }
+
+                    if(divIp) {
+                        if(data.status === "RUNNING" && ((data.ipv4 && data.ipv4.length > 0) || (data.ipv6 && data.ipv6.length > 0))) {
+                            let ipsV4 = (data.ipv4 || []).join(', ');
+                            let ipsV6 = (data.ipv6 || []).filter(ip => !ip.startsWith('fe80')).join(', ');
+                            divIp.innerHTML = `> <b>IPv4 NAT:</b> ${ipsV4 || 'N/A'}<br>> <b>IPv6 Public:</b> ${ipsV6 || 'N/A'}`;
+                        } else { 
+                            divIp.innerHTML = "> Interface is down (VM Offline)..."; 
+                        }
+                    }
+                }).catch(err => {
+                    let badge = document.getElementById(`badge-${id}`);
+                    if (badge) {
+                        badge.className = "status status-suspended";
+                        badge.innerText = "[ AGENT UNREACHABLE ]";
+                        badge.style.background = "orange";
+                    }
+                });
             });
         });
     </script>
