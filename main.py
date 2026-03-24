@@ -330,7 +330,7 @@ async def comprar(request: Request, bg_tasks: BackgroundTasks, node_id: int = Fo
         conn.close()
         return RedirectResponse(url="/dash?msg=OUT+OF+STOCK.+No+resources+available.", status_code=303)
     
-    id_pedido = "vps-" + str(uuid.uuid4())[:15]
+    id_pedido = "vps-" + str(uuid.uuid4())[:13]
     endereco, chave_privada = gerar_carteira()
     p_pol = float(f"{calcular_pol_necessario(node[0]):.6f}")
     
@@ -631,4 +631,11 @@ async def nuke_vps(id_vps: str, admin: str = Depends(verificar_admin)):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(
+        "main:app",        # Use a string "arquivo:instancia"
+        host="127.0.0.1", 
+        port=8000, 
+        workers=1,         # Força EXATAMENTE um processo worker
+        reload=False,      # DESLIGUE o reload (ele cria um processo extra de monitoramento)
+        access_log=False   # ECONOMIA: Desliga o log de cada clique (menos CPU e escrita em disco)
+    )
