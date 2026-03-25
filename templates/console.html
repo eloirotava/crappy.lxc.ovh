@@ -11,7 +11,6 @@
             overflow: hidden; 
             color: #0f0; 
             font-family: monospace;
-            /* Flexbox para gerenciar o layout da tela inteira */
             display: flex;
             flex-direction: column;
             height: 100vh;
@@ -21,24 +20,30 @@
             font-weight: bold; 
             border-bottom: 1px dashed #0f0; 
             background: #0a0a0a;
-            /* Impede o cabeçalho de ser esmagado */
             flex-shrink: 0; 
         }
         #terminal { 
-            /* Faz a div do terminal crescer e ocupar 100% do espaço restante */
             flex-grow: 1; 
             width: 100%; 
             padding: 10px;
             box-sizing: border-box;
         }
-        /* Ajuste fino para a barra de rolagem do xterm no tema escuro */
-        .xterm .xterm-viewport { background-color: #000 !important; }
+        
+        /* Oculta a barra de rolamento para o visual "Hacker" perfeito */
+        .xterm .xterm-viewport::-webkit-scrollbar { 
+            display: none; 
+        }
+        .xterm .xterm-viewport { 
+            -ms-overflow-style: none;  /* IE e Edge */
+            scrollbar-width: none;  /* Firefox */
+            background-color: #000 !important; 
+        }
     </style>
 </head>
 <body>
     <div class="header">
         > root@crappy-lxc:~# lxc-attach -n {{ vps_id }}<br>
-        <span style="color: yellow" id="status">> Negotiating WebSocket with {{ agent_url }}...</span>
+        <span style="color: yellow" id="status">> Negotiating direct WebSocket with {{ agent_url }}...</span>
     </div>
     
     <div id="terminal"></div>
@@ -53,28 +58,43 @@
             theme: { background: '#000000', foreground: '#00ff00' }
         });
         
-        // Ativando o FitAddon
         const fitAddon = new FitAddon.FitAddon();
         term.loadAddon(fitAddon);
-
         term.open(document.getElementById('terminal'));
         
-        // Força o terminal a calcular o tamanho exato da tela na largada
-        fitAddon.fit();
-        
-        // Se o usuário redimensionar a janela do navegador, o terminal recalcula as linhas/colunas
-        window.addEventListener('resize', () => {
+        function resizeTerminal() {
             fitAddon.fit();
-        });
+            if (socket && socket.connected) {
+                socket.emit("resize", { cols: term.cols, rows: term.rows });
+            }
+        }
+
+        window.addEventListener('resize', resizeTerminal);
 
         term.write('Waiting for TTY allocation...\r\n');
 
-        const socket = io("{{ agent_url }}", { transports: ["websocket"] });
+        // VOLTÁMOS AO MODO DIRETO: O teu Cloudflare prefere assim!
+        const socket = io("{{ agent_url }}", { 
+            transports: ["websocket"],
+            secure: true
+        });
+
+        socket.on("connect_error", (err) => {
+            console.error("Socket Connect Error:", err);
+            document.getElementById('status').innerText = "> CONNECTION ERROR: " + err.message;
+            document.getElementById('status').style.color = "red";
+        });
 
         socket.on("connect", () => {
             document.getElementById('status').innerText = "> Connected! Shell established.";
             document.getElementById('status').style.color = "#00ff00";
+            
             socket.emit("connect_vps", { vps_id: "{{ vps_id }}", token: "{{ token }}" });
+            
+            setTimeout(() => {
+                resizeTerminal();
+                term.focus();
+            }, 800);
         });
 
         socket.on("vps_output", (data) => {
@@ -91,8 +111,12 @@
             document.getElementById('status').style.color = "red";
         });
 
-        socket.on("disconnect", () => {
-            term.write('\r\n\r\n[!] Agent disconnected.\r\n');
+        socket.on("disconnect", (reason) => {
+            term.write(`\r\n\r\n[!] Agent disconnected. Reason: ${reason}\r\n`);
+        });
+
+        document.getElementById('terminal').addEventListener('click', () => {
+            term.focus();
         });
     </script>
 </body>
