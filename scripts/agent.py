@@ -11,7 +11,9 @@ import termios
 import struct
 import select
 import signal
-from flask import Flask, request, jsonify
+import platform
+import shutil
+from flask import Flask, request, jsonify, send_file
 from flask_socketio import SocketIO, emit
 from dotenv import load_dotenv
 
@@ -72,6 +74,45 @@ def create_vps():
     if not sucesso: return jsonify({"error": "Deploy failed", "details": output}), 500
     return jsonify({"status": "success", "vps": vps_id, "pass": senha})
 
+@app.route('/rebuild', methods=['POST'])
+def rebuild_vps():
+    if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
+    data = request.json
+    vps_id = data.get('vps_id')
+    distro = data.get('distro', 'alpine')
+    release = data.get('release', 'edge')
+    arch = data.get('arch', 'amd64')
+    disk = data.get('disk_mb', 1024)
+
+    cmd = f"./rebuild_vps.sh '{vps_id}' '{distro}' '{release}' '{arch}' '{disk}'"
+    sucesso, output = run_cmd(cmd)
+    if not sucesso: return jsonify({"error": "Rebuild failed", "details": output}), 500
+    return jsonify({"status": "success"})
+
+@app.route('/templates', methods=['GET'])
+def list_templates():
+    if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
+    
+    arch_map = {'x86_64': 'amd64', 'aarch64': 'arm64', 'armv7l': 'armhf', 'armv8l': 'arm64'}
+    local_arch = arch_map.get(platform.machine(), 'amd64')
+
+    cmd = "/usr/share/lxc/templates/lxc-download --list"
+    sucesso, output = run_cmd(cmd)
+    
+    if not sucesso:
+        return jsonify({"error": "Failed to fetch"}), 500
+
+    distros = {}
+    for line in output.split('\n'):
+        parts = line.split()
+        if len(parts) >= 5 and parts[0] not in ["---", "Distro"]:
+            distro, release, arch, variant = parts[0], parts[1], parts[2], parts[3]
+            if arch == local_arch and variant == "default":
+                if distro not in distros: distros[distro] = []
+                if release not in distros[distro]: distros[distro].append(release)
+
+    return jsonify(distros)
+
 @app.route('/control/<acao>', methods=['POST'])
 def control_vps(acao):
     if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
@@ -98,6 +139,65 @@ def status_vps(vps_id):
     return jsonify({"error": "Failed"}), 500
 
 # ==========================================
+# BACKUP E RESTORE (ZSTD)
+# ==========================================
+
+@app.route('/backup/<vps_id>', methods=['GET'])
+def backup_vps(vps_id):
+    if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
+    img_path = f"/var/lib/lxc/{vps_id}/rootdev"
+    if not os.path.exists(img_path): return jsonify({"error": "VPS disk not found"}), 404
+    
+    # Para a VPS para garantir consistência
+    run_cmd(f"lxc-stop -n {vps_id} -k")
+    
+    backup_path = f"/tmp/{vps_id}_backup.img.zst"
+    # Comprime com zstd (nivel 3)
+    sucesso, output = run_cmd(f"zstd -T0 -3 -f {img_path} -o {backup_path}")
+    if not sucesso:
+        return jsonify({"error": "Backup failed", "details": output}), 500
+        
+    return send_file(backup_path, as_attachment=True, download_name=f"{vps_id}_backup.img.zst")
+
+@app.route('/restore/<vps_id>', methods=['POST'])
+def restore_vps(vps_id):
+    if not check_auth(): return jsonify({"error": "Unauthorized"}), 401
+    file = request.files.get('file')
+    if not file: return jsonify({"error": "No file uploaded"}), 400
+    
+    img_path = f"/var/lib/lxc/{vps_id}/rootdev"
+    if not os.path.exists(img_path): return jsonify({"error": "VPS disk not found"}), 404
+    
+    upload_path = f"/tmp/{vps_id}_upload.zst"
+    file.save(upload_path)
+    
+    # Para a VPS
+    run_cmd(f"lxc-stop -n {vps_id} -k")
+    
+    # Obtém o tamanho limite do disco contratado
+    orig_size = os.path.getsize(img_path)
+    
+    # Descomprime
+    tmp_img = f"/tmp/{vps_id}_restore.img"
+    sucesso, output = run_cmd(f"zstd -d -f {upload_path} -o {tmp_img}")
+    if not sucesso:
+        os.remove(upload_path)
+        return jsonify({"error": "Decompression failed", "details": output}), 500
+        
+    # Verifica o tamanho (Segurança principal)
+    new_size = os.path.getsize(tmp_img)
+    if new_size > orig_size:
+        os.remove(upload_path)
+        os.remove(tmp_img)
+        return jsonify({"error": f"Image too large! Exceeds VPS disk limit."}), 400
+        
+    # Substitui o disco e limpa temporarios
+    shutil.move(tmp_img, img_path)
+    os.remove(upload_path)
+    return jsonify({"status": "success"})
+
+
+# ==========================================
 # WEBSOCKETS (MOTOR DE TERMINAL VIRTUAL NATIVO)
 # ==========================================
 
@@ -107,74 +207,48 @@ def on_connect():
 
 @socketio.on('connect_vps')
 def on_connect_vps(data):
-    print(f"[WS DEBUG] Pedido de terminal recebido para VPS: {data.get('vps_id')}")
-    
     if data.get('token') != API_KEY:
-        print("[WS DEBUG] TOKEN INVÁLIDO! Fechando conexão.")
         emit('vps_closed')
         return
         
     vps_id = data.get('vps_id')
-    print("[WS DEBUG] A criar processo PTY nativo (pty.fork)...")
-    
-    try:
-        # A MÁGICA REAL: pty.fork() divide o processo ao meio. O filho vira o terminal.
-        pid, fd = pty.fork()
+    try: pid, fd = pty.fork()
     except Exception as e:
-        print(f"[WS DEBUG] Erro fatal no fork: {e}")
         emit('vps_closed')
         return
 
     if pid == 0:
-        # --- ESTAMOS NO PROCESSO FILHO ---
-        # Ele substitui a si próprio pelo lxc-attach instantaneamente
         env = os.environ.copy()
         env["TERM"] = "xterm-256color"
         cmd = ["lxc-attach", "-n", vps_id]
-        try:
-            os.execvpe(cmd[0], cmd, env)
-        except Exception as e:
-            print(f"[WS DEBUG] Erro no execvpe: {e}")
-            os._exit(1) # Mata o filho se falhar
+        try: os.execvpe(cmd[0], cmd, env)
+        except Exception as e: os._exit(1)
 
-    # --- ESTAMOS NO PROCESSO PAI ---
-    # Este continua a escutar o Socket e a enviar dados
     master_fd = fd
     child_pid = pid
     pty_sessions[request.sid] = {'fd': master_fd, 'child_pid': child_pid}
-    print(f"[WS DEBUG] Sessão iniciada com sucesso. PID do lxc-attach: {child_pid}")
     
-    # Define o tamanho inicial do terminal
     try:
         winsize = struct.pack("HHHH", 24, 80, 0, 0)
         fcntl.ioctl(master_fd, termios.TIOCSWINSZ, winsize)
     except: pass
     
     def read_pty(fd, sid):
-        print(f"[WS DEBUG] Thread de leitura iniciada para SID: {sid}")
         while True:
-            socketio.sleep(0.01) # Yield obrigatório
+            socketio.sleep(0.01)
             try:
                 r, w, e = select.select([fd], [], [], 0.1)
                 if fd in r:
                     output = os.read(fd, 10240)
-                    if not output:
-                        print(f"[WS DEBUG] Fim de leitura do PTY (EOF). SID: {sid}")
-                        break
+                    if not output: break
                     socketio.emit('vps_output', {'output': output.decode('utf-8', errors='replace')}, room=sid)
-            except OSError as e:
-                print(f"[WS DEBUG] O PTY fechou (Processo terminou): {e}")
-                break
-            except Exception as e:
-                print(f"[WS DEBUG] ERRO NO PTY: {e}")
-                break
+            except: break
         socketio.emit('vps_closed', room=sid)
 
     socketio.start_background_task(read_pty, master_fd, request.sid)
 
     def wake_up_terminal():
         socketio.sleep(0.5)
-        print(r"[WS DEBUG] Enviando Enter (\n) para acordar o prompt...")
         try: os.write(master_fd, b'\n')
         except: pass
 
@@ -194,23 +268,17 @@ def on_resize(data):
         try:
             winsize = struct.pack("HHHH", data.get('rows', 24), data.get('cols', 80), 0, 0)
             fcntl.ioctl(session['fd'], termios.TIOCSWINSZ, winsize)
-            print(f"[WS DEBUG] Terminal redimensionado para {data.get('cols')}x{data.get('rows')}")
         except: pass
 
 @socketio.on('disconnect')
 def on_disconnect():
-    print(f"\n[WS DEBUG] Cliente desconectado. SID: {request.sid}")
     session = pty_sessions.pop(request.sid, None)
-    if session:
-        print(f"[WS DEBUG] Limpando sessão PTY. Matando PID: {session['child_pid']}")
-        try:
+    if session:  
+        try:  
             os.close(session['fd'])
             os.kill(session['child_pid'], signal.SIGKILL)
-        except Exception as e: 
-            print(f"[WS DEBUG] Erro ao matar processo: {e}")
+        except: pass
 
 if __name__ == '__main__':
     print(">>> [READY] Servidor escutando na porta 5000...")
     socketio.run(app, host='0.0.0.0', port=5000)
-
-

@@ -1,5 +1,5 @@
-from fastapi import FastAPI, Request, Form, BackgroundTasks, Response, Depends, HTTPException, status
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi import FastAPI, Request, Form, BackgroundTasks, Response, Depends, HTTPException, status, UploadFile, File
+from fastapi.responses import HTMLResponse, RedirectResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
 from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from crypto_utils import gerar_carteira, verificar_pagamento_pol, calcular_pol_necessario, varrer_carteira, w3
 from email_utils import enviar_email_confirmacao, enviar_email_pagamento, enviar_email_deploy, enviar_email_recuperacao
 from log_manager import registrar_log
-from lxc_client import chamar_agent_banana_pi, rebuild_vps
+from lxc_client import chamar_agent_banana_pi
 
 load_dotenv()
 
@@ -98,11 +98,11 @@ init_db()
 def get_node_info(id_vps):
     conn = sqlite3.connect("db.sqlite")
     res = conn.execute("""
-        SELECT n.url_agente, n.token_agente, n.ram_mb, n.swap_mb, n.disk_mb, n.cpu_fraction, n.cpu_core, n.id, n.deploy_script
+        SELECT n.url_agente, n.token_agente, n.ram_mb, n.swap_mb, n.disk_mb, n.cpu_fraction, n.cpu_core, n.id, n.deploy_script, n.arquitetura
         FROM vps v JOIN nodes n ON v.node_id = n.id WHERE v.id = ?
     """, (id_vps,)).fetchone()
     conn.close()
-    return res if res else (None, None, 64, 32, 1024, "20%", "0", 1, "create_vps.sh")
+    return res if res else (None, None, 64, 32, 1024, "20%", "0", 1, "create_vps.sh", "amd64")
 
 def alocar_ips_disponiveis(node_id):
     conn = sqlite3.connect("db.sqlite")
@@ -165,16 +165,16 @@ async def login_page(request: Request): return templates.TemplateResponse("login
 
 @app.post("/registar")
 async def registar(bg_tasks: BackgroundTasks, email: str = Form(...), pw: str = Form(...), tos: str = Form(None)):
-    if not tos: return RedirectResponse(url="/login?msg=You+must+accept+the+ToS", status_code=303)
+    if not tos: return RedirectResponse(url="/login?msg=Voce+deve+aceitar+os+termos", status_code=303)
     token = str(uuid.uuid4())
     conn = sqlite3.connect("db.sqlite")
     try:
         conn.execute("INSERT INTO users (email, pw, conf, token) VALUES (?, ?, ?, ?)", (email, pw, False, token))
         conn.commit()
         bg_tasks.add_task(enviar_email_confirmacao, email, f"{BASE_URL}/confirmar/{token}")
-    except sqlite3.IntegrityError: return RedirectResponse(url="/login?msg=Email+already+exists", status_code=303)
+    except sqlite3.IntegrityError: return RedirectResponse(url="/login?msg=Email+ja+existe", status_code=303)
     finally: conn.close()
-    return RedirectResponse(url="/login?msg=Check+your+email", status_code=303)
+    return RedirectResponse(url="/login?msg=Verifique+seu+email", status_code=303)
 
 @app.get("/confirmar/{token}")
 async def confirmar(token: str):
@@ -182,14 +182,14 @@ async def confirmar(token: str):
     conn.execute("UPDATE users SET conf = True WHERE token = ?", (token,))
     conn.commit()
     conn.close()
-    return RedirectResponse(url="/login?msg=Account+Confirmed!", status_code=303)
+    return RedirectResponse(url="/login?msg=Conta+Confirmada!", status_code=303)
 
 @app.post("/login")
 async def login(response: Response, email: str = Form(...), pw: str = Form(...)):
     conn = sqlite3.connect("db.sqlite")
     user = conn.execute("SELECT conf FROM users WHERE email=? AND pw=?", (email, pw)).fetchone()
     conn.close()
-    if not user or not user[0]: return RedirectResponse(url="/login?msg=Invalid+credentials+or+unconfirmed", status_code=303)
+    if not user or not user[0]: return RedirectResponse(url="/login?msg=Credenciais+invalidas+ou+nao+confirmada", status_code=303)
     res = RedirectResponse(url="/dash", status_code=303)
     res.set_cookie(key="sessao", value=email)
     return res
@@ -206,7 +206,7 @@ async def forgot_post(bg_tasks: BackgroundTasks, email: str = Form(...)):
         conn.commit()
         bg_tasks.add_task(enviar_email_recuperacao, email, f"{BASE_URL}/reset/{token}")
     conn.close()
-    return RedirectResponse(url="/forgot?msg=If+email+exists,+recovery+sent.", status_code=303)
+    return RedirectResponse(url="/forgot?msg=Email+de+recuperacao+enviado.", status_code=303)
 
 @app.get("/reset/{token}", response_class=HTMLResponse)
 async def reset_page(request: Request, token: str): return templates.TemplateResponse("login.html", {"request": request, "token": token, "mode": "reset"})
@@ -218,9 +218,9 @@ async def reset_post(token: str, pw: str = Form(...)):
         conn.execute("UPDATE users SET pw = ?, reset_token = NULL WHERE reset_token = ?", (pw, token))
         conn.commit()
         conn.close()
-        return RedirectResponse(url="/login?msg=Password+Updated!+Please+Login.", status_code=303)
+        return RedirectResponse(url="/login?msg=Senha+Atualizada!+Faca+Login.", status_code=303)
     conn.close()
-    return RedirectResponse(url="/login?msg=Invalid+or+Expired+Token", status_code=303)
+    return RedirectResponse(url="/login?msg=Token+Invalido+ou+Expirado", status_code=303)
 
 @app.get("/dash", response_class=HTMLResponse)
 async def dash(request: Request):
@@ -251,7 +251,7 @@ async def comprar(request: Request, bg_tasks: BackgroundTasks, node_id: int = Fo
     node = conn.execute("SELECT preco_usd, limite_vps FROM nodes WHERE id=? AND ativo=1", (node_id,)).fetchone()
     if not node: return RedirectResponse(url="/dash?msg=Servidor+indisponivel", status_code=303)
     if conn.execute("SELECT COUNT(*) FROM vps WHERE node_id=? AND status NOT IN ('DELETED', 'TERMINATED')", (node_id,)).fetchone()[0] >= node[1]:
-        return RedirectResponse(url="/dash?msg=OUT+OF+STOCK.+No+resources+available.", status_code=303)
+        return RedirectResponse(url="/dash?msg=ESGOTADO.+Sem+recursos+neste+node.", status_code=303)
     
     id_pedido = "vps-" + str(uuid.uuid4())[:13]
     endereco, chave_privada = gerar_carteira()
@@ -279,14 +279,14 @@ async def verificar_pagamento(id_vps: str, request: Request, bg_tasks: Backgroun
         
         if status == 'PENDING PAYMENT': bg_tasks.add_task(processar_ativacao_apos_pagamento, id_vps, email)
         elif status == 'SUSPENDED':
-            agent_url, agent_token, _, _, _, _, _, _, _ = get_node_info(id_vps)
+            agent_url, agent_token, _, _, _, _, _, _, _, _ = get_node_info(id_vps)
             bg_tasks.add_task(enviar_comando_agente, id_vps, "start", agent_url, agent_token)
             
-        return RedirectResponse(url=f"/dash?msg=PAYMENT+CONFIRMED!+Added+{dias_add}+days.", status_code=303)
-    return RedirectResponse(url="/dash?msg=NO+FUNDS+FOUND.+Blockchain+may+take+a+minute.+Try+again.", status_code=303)
+        return RedirectResponse(url=f"/dash?msg=PAGAMENTO+CONFIRMADO!+Adicionado+{dias_add}+dias.", status_code=303)
+    return RedirectResponse(url="/dash?msg=SEM+FUNDO.+A+Blockchain+pode+demorar.+Tente+novamente.", status_code=303)
 
 async def processar_ativacao_apos_pagamento(id_vps, email):
-    agent_url, agent_token, ram, swap, disk, cpu, cpu_core, node_id, deploy_script = get_node_info(id_vps)
+    agent_url, agent_token, ram, swap, disk, cpu, cpu_core, node_id, deploy_script, _ = get_node_info(id_vps)
     if not agent_url: return
     rede = alocar_ips_disponiveis(node_id)
     if not rede: return
@@ -305,7 +305,7 @@ async def processar_ativacao_apos_pagamento(id_vps, email):
 async def apagar_vps(id_vps: str, request: Request, bg_tasks: BackgroundTasks):
     email = request.cookies.get("sessao")
     if not email: return RedirectResponse("/login")
-    agent_url, agent_token, _, _, _, _, _, _, _ = get_node_info(id_vps)
+    agent_url, agent_token, _, _, _, _, _, _, _, _ = get_node_info(id_vps)
     conn = sqlite3.connect("db.sqlite")
     conn.execute("UPDATE vps SET status = 'DELETED', ipv4 = NULL, ipv6 = NULL WHERE id=? AND email=?", (id_vps, email))
     conn.commit()
@@ -322,43 +322,89 @@ async def painel_controle_vps(id_vps: str, acao: str, request: Request, bg_tasks
     vps = conn.execute("SELECT id FROM vps WHERE id=? AND email=? AND status='ATIVA'", (id_vps, email)).fetchone()
     conn.close()
     if vps and acao in ["start", "stop", "restart"]:
-        agent_url, agent_token, _, _, _, _, _, _, _ = get_node_info(id_vps)
+        agent_url, agent_token, _, _, _, _, _, _, _, _ = get_node_info(id_vps)
         if agent_url:
             bg_tasks.add_task(enviar_comando_agente, id_vps, acao, agent_url, agent_token)
             registrar_log("LXC_POWER", f"Ordem {acao} enviada para {id_vps}", "INFO", email)
     return RedirectResponse(url="/dash", status_code=303)
+
+# ==========================================
+# ROTAS REBUILD, BACKUP E RESTORE (CORRIGIDO)
+# ==========================================
 
 @app.post("/rebuild/{id_vps}")
 async def api_rebuild_vps(id_vps: str, request: Request, bg_tasks: BackgroundTasks, distro: str = Form(...), release: str = Form(...)):
     email = request.cookies.get("sessao")
     if not email: return RedirectResponse("/login")
     
-    conn = sqlite3.connect("db.sqlite")
-    vps = conn.execute("SELECT v.id, n.url_agente, n.token_agente, n.arquitetura, n.disk_mb FROM vps v JOIN nodes n ON v.node_id = n.id WHERE v.id=? AND v.email=? AND v.status='ATIVA'", (id_vps, email)).fetchone()
-    conn.close()
+    agent_url, agent_token, ram, swap, disk_mb, cpu, cpu_core, node_id, deploy_script, arquitetura = get_node_info(id_vps)
+    if not agent_url: return RedirectResponse(url="/dash?msg=ERRO.+Node+nao+encontrado.", status_code=303)
     
-    if vps:
-        _, agent_url, agent_token, arch, disk = vps
-        if agent_url:
-            bg_tasks.add_task(processar_rebuild, id_vps, agent_url, agent_token, distro, release, arch, disk, email)
-            registrar_log("REBUILD", f"Ordem de rebuild enviada para {id_vps} ({distro} {release})", "INFO", email)
-            return RedirectResponse(url="/dash?msg=REBUILD+STARTED.+Wait+a+minute+before+accessing+the+console.", status_code=303)
-    
-    return RedirectResponse(url="/dash?msg=ERROR.+VPS+not+found+or+not+active.", status_code=303)
+    bg_tasks.add_task(processar_rebuild, id_vps, agent_url, agent_token, distro, release, arquitetura, disk_mb, email)
+    registrar_log("REBUILD", f"Ordem de rebuild enviada para {id_vps} ({distro} {release})", "INFO", email)
+    return RedirectResponse(url="/dash?msg=FORMATACAO+INICIADA.+Aguarde+um+minuto+antes+de+abrir+o+console.", status_code=303)
 
-async def processar_rebuild(id_vps, agent_url, agent_token, distro, release, arch, disk, email):
-    sucesso = await rebuild_vps(id_vps, agent_url, agent_token, distro, release, arch, disk)
-    if sucesso:
-        registrar_log("REBUILD_OK", f"VPS {id_vps} recriada com {distro} {release}", "SUCCESS", email)
+async def processar_rebuild(id_vps, agent_url, agent_token, distro, release, arch, disk_mb, email):
+    headers = {"X-API-Key": agent_token}
+    payload = {"vps_id": id_vps, "distro": distro, "release": release, "arch": arch, "disk_mb": disk_mb}
+    async with httpx.AsyncClient(timeout=300.0, verify=False) as client:
+        resp = await client.post(f"{agent_url.rstrip('/')}/rebuild", headers=headers, json=payload)
+        if resp.status_code == 200:
+            registrar_log("REBUILD_OK", f"VPS {id_vps} recriada com {distro} {release}", "SUCCESS", email)
+        else:
+            registrar_log("REBUILD_FAIL", f"Falha ao recriar VPS {id_vps}", "ERROR", email)
+
+@app.get("/backup/{id_vps}")
+async def backup_vps(id_vps: str, request: Request):
+    email = request.cookies.get("sessao")
+    if not email: return RedirectResponse("/login")
+    
+    conn = sqlite3.connect("db.sqlite")
+    vps = conn.execute("SELECT id FROM vps WHERE id=? AND email=? AND status='ATIVA'", (id_vps, email)).fetchone()
+    conn.close()
+    if not vps: return RedirectResponse("/dash")
+    
+    agent_url, agent_token, _, _, _, _, _, _, _, _ = get_node_info(id_vps)
+    
+    async def iterfile():
+        async with httpx.AsyncClient(timeout=600.0, verify=False) as client:
+            async with client.stream("GET", f"{agent_url.rstrip('/')}/backup/{id_vps}", headers={"X-API-Key": agent_token}) as r:
+                async for chunk in r.aiter_bytes():
+                    yield chunk
+                    
+    return StreamingResponse(iterfile(), media_type="application/zstd", headers={"Content-Disposition": f"attachment; filename={id_vps}_backup.img.zst"})
+
+@app.post("/restore/{id_vps}")
+async def restore_vps(id_vps: str, request: Request, file: UploadFile = File(...)):
+    email = request.cookies.get("sessao")
+    if not email: return RedirectResponse("/login")
+    
+    conn = sqlite3.connect("db.sqlite")
+    vps = conn.execute("SELECT id FROM vps WHERE id=? AND email=? AND status='ATIVA'", (id_vps, email)).fetchone()
+    conn.close()
+    if not vps: return RedirectResponse("/dash?msg=VPS+NAO+ENCONTRADA")
+    
+    agent_url, agent_token, _, _, _, _, _, _, _, _ = get_node_info(id_vps)
+    
+    # [CORREÇÃO AQUI] Lê o arquivo todo para a memória primeiro para garantir o envio completo pro Node
+    file_bytes = await file.read()
+    
+    async with httpx.AsyncClient(timeout=1200.0, verify=False) as client:
+        files = {'file': (file.filename, file_bytes, file.content_type)}
+        resp = await client.post(f"{agent_url.rstrip('/')}/restore/{id_vps}", headers={"X-API-Key": agent_token}, files=files)
+        
+    if resp.status_code == 200:
+        return RedirectResponse(url="/dash?msg=RESTORE+CONCLUIDO!+O+disco+foi+substituido.", status_code=303)
     else:
-        registrar_log("REBUILD_FAIL", f"Falha ao recriar VPS {id_vps}", "ERROR", email)
+        err = resp.json().get("error", "Erro desconhecido")
+        return RedirectResponse(url=f"/dash?msg=FALHA+NO+RESTORE:+{err}", status_code=303)
 
 
 @app.get("/api/status/{id_vps}")
 async def get_vps_status(id_vps: str, request: Request):
     email = request.cookies.get("sessao")
     if not email: return {"error": "unauthorized"}
-    agent_url, agent_token, _, _, _, _, _, _, _ = get_node_info(id_vps)
+    agent_url, agent_token, _, _, _, _, _, _, _, _ = get_node_info(id_vps)
     if not agent_url: return {"error": "not found"}
     try:
         url_limpa = agent_url.rstrip('/')
@@ -372,7 +418,7 @@ async def api_get_templates(id_vps: str, request: Request):
     email = request.cookies.get("sessao")
     if not email: return {"error": "unauthorized"}
     
-    agent_url, agent_token, _, _, _, _, _, _, _ = get_node_info(id_vps)
+    agent_url, agent_token, _, _, _, _, _, _, _, _ = get_node_info(id_vps)
     if not agent_url: return {"error": "not found"}
     
     try:
@@ -391,7 +437,7 @@ async def web_console(id_vps: str, request: Request):
     vps = conn.execute("SELECT id FROM vps WHERE id=? AND email=? AND status='ATIVA'", (id_vps, email)).fetchone()
     conn.close()
     if not vps: return RedirectResponse("/dash")
-    agent_url, agent_token, _, _, _, _, _, _, _ = get_node_info(id_vps)
+    agent_url, agent_token, _, _, _, _, _, _, _, _ = get_node_info(id_vps)
     return templates.TemplateResponse("console.html", {"request": request, "vps_id": id_vps, "agent_url": agent_url, "token": agent_token})
 
 @app.post("/ticket")
@@ -402,7 +448,7 @@ async def novo_ticket(request: Request, assunto: str = Form(...), mensagem: str 
     conn.execute("INSERT INTO tickets (email, assunto, mensagem) VALUES (?, ?, ?)", (email, assunto, mensagem))
     conn.commit()
     conn.close()
-    return RedirectResponse(url="/dash?msg=Ticket+Created", status_code=303)
+    return RedirectResponse(url="/dash?msg=Ticket+Criado", status_code=303)
 
 @app.post("/ops/ticket_reply/{ticket_id}")
 async def responder_ticket(ticket_id: int, resposta: str = Form(...), admin: str = Depends(verificar_admin)):
@@ -410,7 +456,7 @@ async def responder_ticket(ticket_id: int, resposta: str = Form(...), admin: str
     conn.execute("UPDATE tickets SET resposta = ?, status = 'CLOSED' WHERE id = ?", (resposta, ticket_id))
     conn.commit()
     conn.close()
-    return RedirectResponse(url="/ops?msg=Ticket+Replied", status_code=303)
+    return RedirectResponse(url="/ops?msg=Ticket+Respondido", status_code=303)
 
 @app.get("/ops", response_class=HTMLResponse)
 async def painel_ops(request: Request, admin: str = Depends(verificar_admin)):
@@ -456,7 +502,7 @@ async def force_activate(id_vps: str, bg_tasks: BackgroundTasks, admin: str = De
     return RedirectResponse(url="/ops?msg=Manual+Deploy+Started", status_code=303)
 
 async def processar_ativacao_manual(id_vps, email):
-    agent_url, agent_token, ram, swap, disk, cpu, cpu_core, node_id, deploy_script = get_node_info(id_vps)
+    agent_url, agent_token, ram, swap, disk, cpu, cpu_core, node_id, deploy_script, _ = get_node_info(id_vps)
     if not agent_url: return
     rede = alocar_ips_disponiveis(node_id)
     if not rede: return

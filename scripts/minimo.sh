@@ -57,15 +57,10 @@ lxc.net.0.ipv4.address = $IPV4
 lxc.net.0.ipv4.gateway = $IPV4_GW
 lxc.net.0.ipv6.address = $IPV6
 lxc.net.0.ipv6.gateway = $IPV6_GW
-lxc.mount.entry = /dev/fuse dev/fuse none bind,create=file 0 0
-lxc.mount.entry = /dev/net/tun dev/net/tun none bind,create=file 0 0
-lxc.cgroup2.devices.allow = c 10:229 rwm
-lxc.cgroup2.devices.allow = c 10:200 rwm
 lxc.idmap = u 0 100000 65536
 lxc.idmap = g 0 100000 65536
 lxc.net.0.script.up = /root/lxc.sh
 lxc.net.0.script.down = /root/lxc.sh
-lxc.environment = PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 # Limites Brutais (cgroup2)
 lxc.cgroup2.memory.max = ${RAM_MB}M
@@ -78,28 +73,46 @@ if [ "$CPU_CORE" != "0" ] && [ "$CPU_CORE" != "" ]; then
     echo "lxc.cgroup2.cpuset.cpus = $CPU_CORE" >> "$LXC_PATH/config"
 fi
 
-lxc-start -n "$VPS_ID"
+# =========================================================
+# 3. MÁGICA DO CHROOT EM DISCO VIRTUAL
+echo "[*] Montando disco e injetando Dropbear..." >> $LOG_FILE
+mount -o loop "$LXC_PATH/rootdev" "$ROOTFS"
+# =========================================================
 
-sleep 2
+cp /etc/resolv.conf "$ROOTFS/etc/resolv.conf"
 
-lxc-attach -n "$VPS_ID" -- sh -c "echo -e 'nameserver 1.1.1.1\nnameserver 2606:4700:4700::1111' > /etc/resolv.conf"
-#lxc-attach -n "$VPS_ID" -- sh -c "echo -e 'auto lo\niface lo inet loopback' > /etc/network/interfaces"
-lxc-attach -n "$VPS_ID" -- sh -c "echo -e 'auto lo\niface lo inet loopback\n\nauto eth0\niface eth0 inet manual' > /etc/network/interfaces"
+chroot "$ROOTFS" apk update >> $LOG_FILE 2>&1
+chroot "$ROOTFS" apk add dropbear procps >> $LOG_FILE 2>&1
 
-lxc-attach -n "$VPS_ID" -- apk update >> $LOG_FILE 2>&1
-lxc-attach -n "$VPS_ID" -- apk add dropbear procps >> $LOG_FILE 2>&1
-lxc-attach -n "$VPS_ID" -- rc-update add dropbear
+mkdir -p "$ROOTFS/etc/dropbear"
+chroot "$ROOTFS" dropbearkey -t ecdsa -f /etc/dropbear/dropbear_ecdsa_host_key 2>/dev/null
+chroot "$ROOTFS" dropbearkey -t ed25519 -f /etc/dropbear/dropbear_ed25519_host_key 2>/dev/null
+chroot "$ROOTFS" dropbearkey -t rsa -f /etc/dropbear/dropbear_rsa_host_key 2>/dev/null
 
-echo "root:$ROOT_PASS" | lxc-attach -n "$VPS_ID" -- chpasswd
+chown 100000:100000 "$ROOTFS/etc/dropbear/"*
+chmod 600 "$ROOTFS/etc/dropbear/"*_key
 
-lxc-attach -n "$VPS_ID" -- rm -rf /var/cache/apk/*
-lxc-stop -n "$VPS_ID" >> $LOG_FILE 2>&1
+# O Inittab Perfeito (Sem runlevels, direto no kernel)
+cat <<EOF > "$ROOTFS/etc/inittab"
+::sysinit:/sbin/ip link set lo up
+::respawn:/usr/sbin/dropbear -F -E
+::ctrlaltdel:/sbin/reboot
+EOF
+
+# Configura a Senha Dinâmica gerada pelo agent.py
+echo "root:$ROOT_PASS" | chroot "$ROOTFS" chpasswd
+
+echo -e "auto lo\niface lo inet loopback" > "$ROOTFS/etc/network/interfaces"
+echo -e "nameserver 1.1.1.1\nnameserver 2606:4700:4700::1111" > "$ROOTFS/etc/resolv.conf"
+rm -rf "$ROOTFS/var/cache/apk/*"
+
+# =========================================================
+# FIM DA MÁGICA: Desmonta o disco
+umount "$ROOTFS"
+# =========================================================
 
 echo "[*] Iniciando a VPS Minimalista..." >> $LOG_FILE
 lxc-start -n "$VPS_ID" >> $LOG_FILE 2>&1
-
-
-
 
 echo "[SUCESSO] VPS $VPS_ID finalizada e rodando Dropbear!" >> $LOG_FILE
 exit 0
