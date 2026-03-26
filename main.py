@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from crypto_utils import gerar_carteira, verificar_pagamento_pol, calcular_pol_necessario, varrer_carteira, w3
 from email_utils import enviar_email_confirmacao, enviar_email_pagamento, enviar_email_deploy, enviar_email_recuperacao
 from log_manager import registrar_log
-from lxc_client import chamar_agent_banana_pi
+from lxc_client import chamar_agent_banana_pi, rebuild_vps
 
 load_dotenv()
 
@@ -133,7 +133,6 @@ def alocar_ips_disponiveis(node_id):
     
     novo_v6_str = None
     for i in range(1, limite + 5):
-        # AQUI ESTÁ A MÁGICA: +1 evita o IP :0 que causa o bug do router
         candidato_int = base_v6_int + (i * step_v6) + 1
         if candidato_int not in v6_usados:
             novo_v6_str = str(ipaddress.IPv6Address(candidato_int))
@@ -329,6 +328,32 @@ async def painel_controle_vps(id_vps: str, acao: str, request: Request, bg_tasks
             registrar_log("LXC_POWER", f"Ordem {acao} enviada para {id_vps}", "INFO", email)
     return RedirectResponse(url="/dash", status_code=303)
 
+@app.post("/rebuild/{id_vps}")
+async def api_rebuild_vps(id_vps: str, request: Request, bg_tasks: BackgroundTasks, distro: str = Form(...), release: str = Form(...)):
+    email = request.cookies.get("sessao")
+    if not email: return RedirectResponse("/login")
+    
+    conn = sqlite3.connect("db.sqlite")
+    vps = conn.execute("SELECT v.id, n.url_agente, n.token_agente, n.arquitetura, n.disk_mb FROM vps v JOIN nodes n ON v.node_id = n.id WHERE v.id=? AND v.email=? AND v.status='ATIVA'", (id_vps, email)).fetchone()
+    conn.close()
+    
+    if vps:
+        _, agent_url, agent_token, arch, disk = vps
+        if agent_url:
+            bg_tasks.add_task(processar_rebuild, id_vps, agent_url, agent_token, distro, release, arch, disk, email)
+            registrar_log("REBUILD", f"Ordem de rebuild enviada para {id_vps} ({distro} {release})", "INFO", email)
+            return RedirectResponse(url="/dash?msg=REBUILD+STARTED.+Wait+a+minute+before+accessing+the+console.", status_code=303)
+    
+    return RedirectResponse(url="/dash?msg=ERROR.+VPS+not+found+or+not+active.", status_code=303)
+
+async def processar_rebuild(id_vps, agent_url, agent_token, distro, release, arch, disk, email):
+    sucesso = await rebuild_vps(id_vps, agent_url, agent_token, distro, release, arch, disk)
+    if sucesso:
+        registrar_log("REBUILD_OK", f"VPS {id_vps} recriada com {distro} {release}", "SUCCESS", email)
+    else:
+        registrar_log("REBUILD_FAIL", f"Falha ao recriar VPS {id_vps}", "ERROR", email)
+
+
 @app.get("/api/status/{id_vps}")
 async def get_vps_status(id_vps: str, request: Request):
     email = request.cookies.get("sessao")
@@ -341,6 +366,22 @@ async def get_vps_status(id_vps: str, request: Request):
             resp = await client.get(f"{url_limpa}/status/{id_vps}", headers={"X-API-Key": agent_token})
             return resp.json()
     except Exception: return {"error": "agent unreachable"}
+
+@app.get("/api/templates/{id_vps}")
+async def api_get_templates(id_vps: str, request: Request):
+    email = request.cookies.get("sessao")
+    if not email: return {"error": "unauthorized"}
+    
+    agent_url, agent_token, _, _, _, _, _, _, _ = get_node_info(id_vps)
+    if not agent_url: return {"error": "not found"}
+    
+    try:
+        url_limpa = agent_url.rstrip('/')
+        async with httpx.AsyncClient(timeout=30.0, verify=False, follow_redirects=True) as client:
+            resp = await client.get(f"{url_limpa}/templates", headers={"X-API-Key": agent_token})
+            return resp.json()
+    except Exception as e: 
+        return {"error": "agent unreachable"}
 
 @app.get("/console/{id_vps}", response_class=HTMLResponse)
 async def web_console(id_vps: str, request: Request):

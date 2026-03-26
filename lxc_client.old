@@ -3,7 +3,11 @@ import asyncio
 import httpx
 
 async def chamar_agent_banana_pi(id_vps, agent_url, agent_token, distro="alpine", ram_mb=64, swap_mb=32, disk_mb=1024, cpu_fraction="20%", cpu_core="0", ipv4=None, ipv4_gw=None, ipv6=None, ipv6_gw=None, deploy_script="create_vps.sh"):
+    """
+    Solicita ao agente remoto a criação da VPS, enviando IPs e qual script executar.
+    """
     headers = {"X-API-Key": agent_token}
+    
     payload = {
         "vps_id": id_vps,
         "distro": distro,
@@ -41,21 +45,4 @@ async def controlar_vps(id_vps, acao, agent_url, agent_token):
             return resp.status_code == 200
         except Exception as e:
             print(f"[AGENT] Falha controle: {e}")
-            return False
-
-async def rebuild_vps(id_vps, agent_url, agent_token, distro, release, arch, disk_mb):
-    headers = {"X-API-Key": agent_token}
-    payload = {
-        "vps_id": id_vps,
-        "distro": distro,
-        "release": release,
-        "arch": arch,
-        "disk_mb": disk_mb
-    }
-    async with httpx.AsyncClient(timeout=180.0) as client:
-        try:
-            resp = await client.post(f"{agent_url}/rebuild", json=payload, headers=headers)
-            return resp.status_code == 200
-        except Exception as e:
-            print(f"[AGENT] Falha no rebuild: {e}")
             return False

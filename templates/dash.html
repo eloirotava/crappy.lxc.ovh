@@ -177,6 +177,24 @@
                         <form action="/apagar_vps/{{ p.id }}" method="POST" style="margin-left: auto; display: inline-block;"><button type="submit" class="btn-action btn-danger" onclick="return confirm('WARNING: Are you sure you want to DESTROY this instance? This cannot be undone.')">[ X ] DESTROY</button></form>
                     </div>
                     <div id="ip-info-{{ p.id }}" style="color: yellow; margin: 15px 0; background: #222; padding: 10px; border: 1px dashed #555;">> Polling network interfaces...</div>
+                    
+                    <details style="margin-top: 15px; border: 1px dashed cyan; padding: 15px; background: #050505;" ontoggle="loadTemplates(this, '{{ p.id }}')">
+                        <summary style="cursor: pointer; color: cyan; font-weight: bold; font-size: 1.1em;">> REBUILD / CHANGE OS</summary>
+                        <p style="color: red; font-size: 0.9em;">> WARNING: This will DESTROY all data on the disk and install a fresh OS. Network must be configured manually via Web Console after rebuild!</p>
+                        <form action="/rebuild/{{ p.id }}" method="POST" style="display: flex; gap: 10px; flex-wrap: wrap;">
+                            
+                            <select name="distro" id="distro-{{ p.id }}" style="background: #000; color: cyan; border: 1px solid cyan; padding: 10px; font-family: inherit; flex: 1; min-width: 150px;" required onchange="updateReleaseOptions('{{ p.id }}')">
+                                <option value="">-- Expand to Load OS --</option>
+                            </select>
+                            
+                            <select name="release" id="release-{{ p.id }}" style="background: #000; color: cyan; border: 1px solid cyan; padding: 10px; font-family: inherit; flex: 1; min-width: 150px;" required>
+                                <option value="">-- Select OS First --</option>
+                            </select>
+                            
+                            <button type="submit" class="btn" style="background: cyan; color: black; margin-top: 0; width: auto;" onclick="return confirm('DESTROY all data and REBUILD?')">> REBUILD</button>
+                        </form>
+                    </details>
+
                     <a href="/console/{{ p.id }}" target="_blank" class="btn btn-console">[ >_ ] OPEN WEB CONSOLE</a>
                     {% endif %}
 
@@ -251,6 +269,62 @@
     </footer>
 
     <script>
+        const templateData = {};
+
+        function loadTemplates(detailsElem, id) {
+            if (!detailsElem.open) return; 
+            
+            const distroSelect = document.getElementById('distro-' + id);
+            if (distroSelect.options.length > 1) return; 
+            
+            distroSelect.innerHTML = '<option value="">-- Fetching from Node... --</option>';
+            
+            fetch(`/api/templates/${id}`)
+                .then(r => r.json())
+                .then(data => {
+                    if (data.error || Object.keys(data).length === 0) {
+                        distroSelect.innerHTML = '<option value="">-- Error fetching list --</option>';
+                        return;
+                    }
+                    
+                    templateData[id] = data; 
+                    
+                    distroSelect.innerHTML = '<option value="">-- Select OS --</option>';
+                    for (const os in data) {
+                        const opt = document.createElement('option');
+                        opt.value = os;
+                        opt.textContent = os.charAt(0).toUpperCase() + os.slice(1);
+                        distroSelect.appendChild(opt);
+                    }
+                })
+                .catch(err => {
+                    distroSelect.innerHTML = '<option value="">-- Network Timeout --</option>';
+                });
+        }
+
+        function updateReleaseOptions(id) {
+            const osSelect = document.getElementById('distro-' + id);
+            const releaseSelect = document.getElementById('release-' + id);
+            releaseSelect.innerHTML = '';
+            
+            const selectedOs = osSelect.value;
+            const data = templateData[id];
+            
+            if(data && data[selectedOs]) {
+                data[selectedOs].forEach(ver => {
+                    const opt = document.createElement('option');
+                    opt.value = ver;
+                    opt.textContent = ver;
+                    releaseSelect.appendChild(opt);
+                });
+            } else {
+                const opt = document.createElement('option');
+                opt.value = "";
+                opt.textContent = "-- Select OS First --";
+                releaseSelect.appendChild(opt);
+            }
+        }
+
         function copy(texto, btn) {
             navigator.clipboard.writeText(texto);
             const original = btn.innerText;
